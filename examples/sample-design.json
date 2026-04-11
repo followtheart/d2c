@@ -1,0 +1,333 @@
+{
+  "name": "UserCard",
+  "width": 360,
+  "height": 480,
+  "root": {
+    "id": "root",
+    "name": "card",
+    "type": "container",
+    "x": 0,
+    "y": 0,
+    "width": 360,
+    "height": 480,
+    "background": "#ffffff",
+    "borderRadius": 16,
+    "shadow": { "x": 0, "y": 8, "blur": 24, "color": "rgba(15,23,42,0.08)" },
+    "padding": 24,
+    "children": [
+      {
+        "id": "header",
+        "name": "Header",
+        "type": "container",
+        "x": 24,
+        "y": 24,
+        "width": 312,
+        "height": 64,
+        "children": [
+          {
+            "id": "avatar",
+            "name": "Avatar",
+            "type": "image",
+            "src": "https://i.pravatar.cc/128",
+            "x": 24,
+            "y": 24,
+            "width": 64,
+            "height": 64,
+            "borderRadius": 32
+          },
+          {
+            "id": "name",
+            "name": "Name",
+            "x": 104,
+            "y": 32,
+            "width": 160,
+            "height": 24,
+            "text": {
+              "content": "Ada Lovelace",
+              "fontSize": 20,
+              "fontWeight": 700,
+              "color": "#0f172a"
+            }
+          },
+          {
+            "id": "handle",
+            "name": "Handle",
+            "x": 104,
+            "y": 60,
+            "width": 160,
+            "height": 20,
+            "text": {
+              "content": "@ada",
+              "fontSize": 14,
+              "fontWeight": 400,
+              "color": "#64748b"
+            }
+          }
+        ]
+      },
+      {
+        "id": "bio",
+        "name": "Bio",
+        "x": 24,
+        "y": 108,
+        "width": 312,
+        "height": 48,
+        "text": {
+          "content": "Mathematician. Writer. First programmer.",
+          "fontSize": 14,
+          "fontWeight": 400,
+          "color": "#334155",
+          "lineHeight": 22
+        }
+      },
+      {
+        "id": "stats",
+        "name": "Stats",
+        "type": "container",
+        "x": 24,
+        "y": 176,
+        "width": 312,
+        "height": 56,
+        "children": [
+          {
+            "id": "stat1",
+            "name": "Followers",
+            "type": "container",
+            "x": 24,
+            "y": 176,
+            "width": 96,
+            "height": 56,
+            "children": [
+              {
+                "id": "stat1v",
+                "name": "Value",
+                "x": 24,
+                "y": 176,
+                "width": 96,
+                "height": 24,
+                "text": { "content": "12.4k", "fontSize": 18, "fontWeight": 700, "color": "#0f172a" }
+              },
+              {
+                "id": "stat1l",
+                "name": "Label",
+                "x": 24,
+                "y": 208,
+                "width": 96,
+                "height": 16,
+                "text": { "content": "Followers", "fontSize": 12, "fontWeight": 500, "color": "#64748b" }
+              }
+            ]
+          },
+          {
+            "id": "stat2",
+            "name": "Following",
+            "type": "container",
+            "x": 132,
+            "y": 176,
+            "width": 96,
+            "height": 56,
+            "children": [
+              {
+                "id": "stat2v",
+                "name": "Value",
+                "x": 132,
+                "y": 176,
+                "width": 96,
+                "height": 24,
+                "text": { "content": "321", "fontSize": 18, "fontWeight": 700, "color": "#0f172a" }
+              },
+              {
+                "id": "stat2l",
+                "name": "Label",
+                "x": 132,
+                "y": 208,
+                "width": 96,
+                "height": 16,
+                "text": { "content": "Following", "fontSize": 12, "fontWeight": 500, "color": "#64748b" }
+              }
+            ]
+          },
+          {
+            "id": "stat3",
+            "name": "Posts",
+            "type": "container",
+            "x": 240,
+            "y": 176,
+            "width": 96,
+            "height": 56,
+            "children": [
+              {
+                "id": "stat3v",
+                "name": "Value",
+                "x": 240,
+                "y": 176,
+                "width": 96,
+                "height": 24,
+                "text": { "content": "87", "fontSize": 18, "fontWeight": 700, "color": "#0f172a" }
+              },
+              {
+                "id": "stat3l",
+                "name": "Label",
+                "x": 240,
+                "y": 208,
+                "width": 96,
+                "height": 16,
+                "text": { "content": "Posts", "fontSize": 12, "fontWeight": 500, "color": "#64748b" }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "actions",
+        "name": "Actions",
+        "type": "container",
+        "x": 24,
+        "y": 252,
+        "width": 312,
+        "height": 48,
+        "children": [
+          {
+            "id": "followBtn",
+            "name": "Follow Button",
+            "type": "container",
+            "x": 24,
+            "y": 252,
+            "width": 148,
+            "height": 48,
+            "background": "#0f172a",
+            "borderRadius": 12,
+            "padding": 12,
+            "children": [
+              {
+                "id": "followLabel",
+                "name": "Label",
+                "x": 24,
+                "y": 252,
+                "width": 148,
+                "height": 24,
+                "text": {
+                  "content": "Follow",
+                  "fontSize": 16,
+                  "fontWeight": 600,
+                  "color": "#ffffff",
+                  "align": "center"
+                }
+              }
+            ]
+          },
+          {
+            "id": "messageBtn",
+            "name": "Message Button",
+            "type": "container",
+            "x": 188,
+            "y": 252,
+            "width": 148,
+            "height": 48,
+            "background": "#ffffff",
+            "borderRadius": 12,
+            "border": { "width": 1, "color": "#e2e8f0" },
+            "padding": 12,
+            "children": [
+              {
+                "id": "messageLabel",
+                "name": "Label",
+                "x": 188,
+                "y": 252,
+                "width": 148,
+                "height": 24,
+                "text": {
+                  "content": "Message",
+                  "fontSize": 16,
+                  "fontWeight": 600,
+                  "color": "#0f172a",
+                  "align": "center"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "tags",
+        "name": "Tags List",
+        "type": "container",
+        "x": 24,
+        "y": 320,
+        "width": 312,
+        "height": 32,
+        "children": [
+          {
+            "id": "tag1",
+            "name": "Tag",
+            "type": "container",
+            "x": 24,
+            "y": 320,
+            "width": 80,
+            "height": 28,
+            "background": "#f1f5f9",
+            "borderRadius": 14,
+            "padding": 6,
+            "children": [
+              {
+                "id": "tag1t",
+                "name": "Text",
+                "x": 24,
+                "y": 320,
+                "width": 80,
+                "height": 16,
+                "text": { "content": "design", "fontSize": 12, "fontWeight": 500, "color": "#334155", "align": "center" }
+              }
+            ]
+          },
+          {
+            "id": "tag2",
+            "name": "Tag",
+            "type": "container",
+            "x": 112,
+            "y": 320,
+            "width": 80,
+            "height": 28,
+            "background": "#f1f5f9",
+            "borderRadius": 14,
+            "padding": 6,
+            "children": [
+              {
+                "id": "tag2t",
+                "name": "Text",
+                "x": 112,
+                "y": 320,
+                "width": 80,
+                "height": 16,
+                "text": { "content": "code", "fontSize": 12, "fontWeight": 500, "color": "#334155", "align": "center" }
+              }
+            ]
+          },
+          {
+            "id": "tag3",
+            "name": "Tag",
+            "type": "container",
+            "x": 200,
+            "y": 320,
+            "width": 80,
+            "height": 28,
+            "background": "#f1f5f9",
+            "borderRadius": 14,
+            "padding": 6,
+            "children": [
+              {
+                "id": "tag3t",
+                "name": "Text",
+                "x": 200,
+                "y": 320,
+                "width": 80,
+                "height": 16,
+                "text": { "content": "poetry", "fontSize": 12, "fontWeight": 500, "color": "#334155", "align": "center" }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

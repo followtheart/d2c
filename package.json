@@ -1,0 +1,24 @@
+{
+  "name": "d2c",
+  "version": "0.1.0",
+  "description": "Design-to-Code converter: Figma/Sketch design files to React/Vue/HTML code",
+  "main": "dist/index.js",
+  "bin": {
+    "d2c": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli.js",
+    "dev": "tsc --watch",
+    "test": "node --test dist/tests/*.test.js",
+    "example:react": "node dist/cli.js --input examples/sample-design.json --platform react --out out/react",
+    "example:vue": "node dist/cli.js --input examples/sample-design.json --platform vue --out out/vue",
+    "example:html": "node dist/cli.js --input examples/sample-design.json --platform html --out out/html"
+  },
+  "keywords": ["d2c", "design-to-code", "figma", "sketch", "codegen", "ai"],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.4.0"
+  }
+}

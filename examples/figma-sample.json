@@ -1,0 +1,58 @@
+{
+  "name": "Figma Sample",
+  "document": {
+    "id": "0:0",
+    "name": "Document",
+    "type": "DOCUMENT",
+    "children": [
+      {
+        "id": "1:1",
+        "name": "Page 1",
+        "type": "CANVAS",
+        "children": [
+          {
+            "id": "2:1",
+            "name": "LoginForm",
+            "type": "FRAME",
+            "absoluteBoundingBox": { "x": 0, "y": 0, "width": 400, "height": 360 },
+            "fills": [{ "type": "SOLID", "color": { "r": 1, "g": 1, "b": 1 } }],
+            "cornerRadius": 12,
+            "layoutMode": "VERTICAL",
+            "itemSpacing": 16,
+            "paddingTop": 32, "paddingRight": 32, "paddingBottom": 32, "paddingLeft": 32,
+            "primaryAxisAlignItems": "MIN",
+            "counterAxisAlignItems": "CENTER",
+            "children": [
+              {
+                "id": "2:2",
+                "name": "Title",
+                "type": "TEXT",
+                "characters": "Welcome back",
+                "absoluteBoundingBox": { "x": 32, "y": 32, "width": 336, "height": 32 },
+                "style": { "fontSize": 24, "fontWeight": 700, "textAlignHorizontal": "CENTER" },
+                "fills": [{ "type": "SOLID", "color": { "r": 0.06, "g": 0.09, "b": 0.16 } }]
+              },
+              {
+                "id": "2:3",
+                "name": "Subtitle",
+                "type": "TEXT",
+                "characters": "Sign in to continue",
+                "absoluteBoundingBox": { "x": 32, "y": 72, "width": 336, "height": 20 },
+                "style": { "fontSize": 14, "fontWeight": 400, "textAlignHorizontal": "CENTER" },
+                "fills": [{ "type": "SOLID", "color": { "r": 0.4, "g": 0.44, "b": 0.52 } }]
+              },
+              {
+                "id": "2:4",
+                "name": "Submit Button",
+                "type": "RECTANGLE",
+                "absoluteBoundingBox": { "x": 32, "y": 280, "width": 336, "height": 48 },
+                "fills": [{ "type": "SOLID", "color": { "r": 0.06, "g": 0.09, "b": 0.16 } }],
+                "cornerRadius": 12
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
