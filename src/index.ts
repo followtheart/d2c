@@ -1,0 +1,12 @@
+export * from './ir/types';
+export { validateIR, IRValidationError } from './ir/schema';
+export { parseDesign, parseFigma, parseNativeDesign } from './parser';
+export { inferLayout } from './layout/inference';
+export { enhance, NoopLLMProvider } from './ai/semanticEnhancer';
+export type { LLMProvider } from './ai/semanticEnhancer';
+export { ClaudeProvider } from './ai/claudeProvider';
+export { createGenerator } from './codegen/factory';
+export type { Platform } from './codegen/factory';
+export type { GenerateResult, GeneratedFile } from './codegen/base';
+export { runPipeline } from './pipeline/d2cPipeline';
+export type { PipelineOptions, PipelineResult } from './pipeline/d2cPipeline';
