@@ -106,8 +106,8 @@ export default ${componentName};
     return `{\n${lines.join('\n')}\n${pad}}`;
   }
 
-  private styleFor(node: IRNode): string {
-    const props = this.buildStyle(node);
+  private styleFor(node: IRNode, parentLayout?: 'flex' | 'grid' | 'absolute'): string {
+    const props = this.buildStyle(node, parentLayout);
     const key = JSON.stringify(props);
     const existing = this.styles.get(key);
     if (existing) return existing.name;
@@ -116,9 +116,17 @@ export default ${componentName};
     return name;
   }
 
-  private buildStyle(node: IRNode): RNStyle {
+  private buildStyle(node: IRNode, parentLayout?: 'flex' | 'grid' | 'absolute'): RNStyle {
     const s: RNStyle = {};
     const { box, layout, style, textStyle } = node;
+
+    // Absolute-positioned child
+    if (parentLayout === 'absolute') {
+      s.position = 'absolute';
+      if (box.x) s.left = Math.round(box.x);
+      if (box.y) s.top = Math.round(box.y);
+    }
+
     if (typeof box.width === 'number') s.width = Math.round(box.width);
     if (typeof box.height === 'number') s.height = Math.round(box.height);
     if (box.padding) {
@@ -156,7 +164,7 @@ export default ${componentName};
       s.flexDirection = 'row';
       s.flexWrap = 'wrap';
       if (layout.gap) s.gap = layout.gap;
-    } else if (layout.type === 'absolute') {
+    } else if (layout.type === 'absolute' && parentLayout !== 'absolute') {
       s.position = 'relative';
     }
 
@@ -179,10 +187,9 @@ export default ${componentName};
     }
     if (textStyle) {
       s.fontSize = textStyle.fontSize;
-      s.fontWeight =
-        (textStyle.fontWeight as unknown as string) === '400'
-          ? 'normal'
-          : String(textStyle.fontWeight);
+      s.fontWeight = textStyle.fontWeight === 400
+        ? 'normal'
+        : String(textStyle.fontWeight);
       s.color = textStyle.color;
       if (textStyle.textAlign) s.textAlign = textStyle.textAlign;
       if (textStyle.lineHeight) s.lineHeight = textStyle.lineHeight;
@@ -190,10 +197,10 @@ export default ${componentName};
     return s;
   }
 
-  private renderNode(node: IRNode, indent: number): string {
+  private renderNode(node: IRNode, indent: number, parentLayout?: 'flex' | 'grid' | 'absolute'): string {
     const pad = ' '.repeat(indent);
     const { tag, isText } = tagFor(node);
-    const styleName = this.styleFor(node);
+    const styleName = this.styleFor(node, parentLayout);
     const styleAttr = ` style={styles.${styleName}}`;
 
     if (tag === 'Image') {
@@ -207,7 +214,8 @@ export default ${componentName};
     if (node.children.length === 0) {
       return `${pad}<${tag}${styleAttr} />`;
     }
-    const children = node.children.map((c) => this.renderNode(c, indent + 2)).join('\n');
+    const childLayout = node.layout.type;
+    const children = node.children.map((c) => this.renderNode(c, indent + 2, childLayout)).join('\n');
     return `${pad}<${tag}${styleAttr}>
 ${children}
 ${pad}</${tag}>`;

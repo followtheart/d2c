@@ -84,7 +84,6 @@ function normPadding(
 }
 
 function toNode(input: NativeInputNode): IRNode {
-  nextId++;
   const type: IRNodeType = input.type ?? 'container';
 
   const box: Box = {

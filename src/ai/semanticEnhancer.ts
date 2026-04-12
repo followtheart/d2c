@@ -23,21 +23,25 @@ interface EnhanceOptions {
   llm?: LLMProvider;
 }
 
+/** Word boundary for design-tool names: non-letter or string boundary. */
+const B = '(^|[^a-z])';
+const E = '([^a-z]|$)';
+
 function pickRoleByName(name: string): SemanticRole | undefined {
   const n = name.toLowerCase();
-  if (/(^|[^a-z])header([^a-z]|$)/.test(n)) return 'header';
-  if (/(^|[^a-z])nav([^a-z]|$)|menu|sidebar/.test(n)) return 'nav';
-  if (/footer/.test(n)) return 'footer';
-  if (/hero|banner/.test(n)) return 'section';
-  if (/card/.test(n)) return 'card';
-  if (/form/.test(n)) return 'form';
-  if (/list|items/.test(n)) return 'list';
-  if (/button|btn|cta/.test(n)) return 'button';
-  if (/avatar|profile.?pic/.test(n)) return 'avatar';
-  if (/badge|tag|chip/.test(n)) return 'badge';
-  if (/icon/.test(n)) return 'icon';
-  if (/divider|separator/.test(n)) return 'divider';
-  if (/title|heading|h[1-6]/.test(n)) return 'heading';
+  if (new RegExp(`${B}header${E}`).test(n)) return 'header';
+  if (new RegExp(`${B}(nav|menu|sidebar)${E}`).test(n)) return 'nav';
+  if (new RegExp(`${B}footer${E}`).test(n)) return 'footer';
+  if (new RegExp(`${B}(hero|banner)${E}`).test(n)) return 'section';
+  if (new RegExp(`${B}card${E}`).test(n)) return 'card';
+  if (new RegExp(`${B}form${E}`).test(n)) return 'form';
+  if (new RegExp(`${B}(list|items)${E}`).test(n)) return 'list';
+  if (new RegExp(`${B}(button|btn|cta)${E}`).test(n)) return 'button';
+  if (new RegExp(`${B}(avatar|profile.?pic)${E}`).test(n)) return 'avatar';
+  if (new RegExp(`${B}(badge|tag|chip)${E}`).test(n)) return 'badge';
+  if (new RegExp(`${B}icon${E}`).test(n)) return 'icon';
+  if (new RegExp(`${B}(divider|separator)${E}`).test(n)) return 'divider';
+  if (new RegExp(`${B}(title|heading|h[1-6])${E}`).test(n)) return 'heading';
   return undefined;
 }
 

@@ -86,7 +86,7 @@ class ${componentName} extends StatelessWidget {
     return s.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
   }
 
-  private renderNode(node: IRNode, indent: number): string {
+  private renderNode(node: IRNode, indent: number, parentLayout?: 'flex' | 'grid' | 'absolute'): string {
     const pad = ' '.repeat(indent);
     const inner = ' '.repeat(indent + 2);
 
@@ -170,14 +170,11 @@ class ${componentName} extends StatelessWidget {
 
   private renderChildrenWidget(node: IRNode, indent: number): string | null {
     if (node.children.length === 0) return null;
-    if (node.children.length === 1) return this.renderNode(node.children[0], indent);
+    const childLayout = node.layout.type;
+    if (node.children.length === 1) return this.renderNode(node.children[0], indent, childLayout);
 
     const pad = ' '.repeat(indent);
     const childPad = ' '.repeat(indent + 2);
-    const children = node.children
-      .map((c) => this.renderNode(c, indent + 4).trimStart())
-      .map((s) => `${childPad}${s}`)
-      .join(',\n');
 
     if (node.layout.type === 'flex') {
       const widget = node.layout.direction === 'column' ? 'Column' : 'Row';
@@ -188,14 +185,39 @@ class ${componentName} extends StatelessWidget {
       if (node.layout.alignItems && ALIGN_CROSS[node.layout.alignItems]) {
         args.push(`crossAxisAlignment: ${ALIGN_CROSS[node.layout.alignItems]}`);
       }
+      // Insert SizedBox between children for gap support
+      const gap = node.layout.gap;
+      const renderedChildren: string[] = [];
+      for (let i = 0; i < node.children.length; i++) {
+        renderedChildren.push(`${childPad}${this.renderNode(node.children[i], indent + 4, childLayout).trimStart()}`);
+        if (gap && i < node.children.length - 1) {
+          const sizedBox = node.layout.direction === 'column'
+            ? `SizedBox(height: ${gap})`
+            : `SizedBox(width: ${gap})`;
+          renderedChildren.push(`${childPad}${sizedBox}`);
+        }
+      }
+      const children = renderedChildren.join(',\n');
       const argLines = args.map((a) => `${childPad}${a},`).join('\n');
       return `${widget}(\n${argLines ? argLines + '\n' : ''}${childPad}children: [\n${children},\n${childPad}],\n${pad})`;
     }
     if (node.layout.type === 'grid') {
-      // Simple wrap fallback
+      const children = node.children
+        .map((c) => this.renderNode(c, indent + 4, childLayout).trimStart())
+        .map((s) => `${childPad}${s}`)
+        .join(',\n');
       return `Wrap(\n${childPad}spacing: ${node.layout.gap ?? 0},\n${childPad}runSpacing: ${node.layout.gap ?? 0},\n${childPad}children: [\n${children},\n${childPad}],\n${pad})`;
     }
-    // absolute fallback
+    // absolute fallback — wrap children in Positioned
+    const children = node.children
+      .map((c) => {
+        const childWidget = this.renderNode(c, indent + 6, childLayout).trimStart();
+        const x = c.box.x;
+        const y = c.box.y;
+        const posArgs = [`left: ${x}`, `top: ${y}`];
+        return `${childPad}Positioned(\n${childPad}  ${posArgs.join(', ')},\n${childPad}  child: ${childWidget},\n${childPad})`;
+      })
+      .join(',\n');
     return `Stack(\n${childPad}children: [\n${children},\n${childPad}],\n${pad})`;
   }
 }

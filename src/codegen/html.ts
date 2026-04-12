@@ -86,8 +86,8 @@ ${this.classCss.join('\n\n')}
     };
   }
 
-  private classFor(node: IRNode): string {
-    const props = buildCssProps(node);
+  private classFor(node: IRNode, parentLayout?: 'flex' | 'grid' | 'absolute'): string {
+    const props = buildCssProps(node, parentLayout);
     const key = JSON.stringify(props);
     if (this.classIndex.has(key)) return this.classIndex.get(key)!;
     const base = kebabCase(node.semantics?.componentName || node.name || node.type);
@@ -97,10 +97,10 @@ ${this.classCss.join('\n\n')}
     return name;
   }
 
-  private renderNode(node: IRNode, indent: number): string {
+  private renderNode(node: IRNode, indent: number, parentLayout?: 'flex' | 'grid' | 'absolute'): string {
     const pad = ' '.repeat(indent);
     const tag = tagFor(node);
-    const className = this.classFor(node);
+    const className = this.classFor(node, parentLayout);
 
     if (node.type === 'image') {
       const src = node.assetRef ?? '';
@@ -117,8 +117,9 @@ ${this.classCss.join('\n\n')}
       return `${pad}<${tag} class="${className}"></${tag}>`;
     }
 
+    const childLayout = node.layout.type;
     const childrenHtml = node.children
-      .map((c) => this.renderNode(c, indent + 2))
+      .map((c) => this.renderNode(c, indent + 2, childLayout))
       .join('\n');
     return `${pad}<${tag} class="${className}">
 ${childrenHtml}

@@ -14,9 +14,16 @@ function numOr(n: number | 'auto' | 'fill', fallback: string): string {
   return fallback;
 }
 
-export function buildCssProps(node: IRNode): Record<string, string> {
+export function buildCssProps(node: IRNode, parentLayout?: 'flex' | 'grid' | 'absolute'): Record<string, string> {
   const css: Record<string, string> = {};
   const { box, layout, style, textStyle } = node;
+
+  // Absolute-positioned child: add absolute + left/top
+  if (parentLayout === 'absolute') {
+    css.position = 'absolute';
+    if (box.x) css.left = px(box.x);
+    if (box.y) css.top = px(box.y);
+  }
 
   // Box sizing
   if (box.width !== 'auto') css.width = numOr(box.width, 'auto');
@@ -55,7 +62,7 @@ export function buildCssProps(node: IRNode): Record<string, string> {
     css.display = 'grid';
     if (layout.columns) css['grid-template-columns'] = `repeat(${layout.columns}, minmax(0, 1fr))`;
     if (layout.gap) css.gap = px(layout.gap);
-  } else if (layout.type === 'absolute') {
+  } else if (layout.type === 'absolute' && parentLayout !== 'absolute') {
     css.position = 'relative';
   }
 

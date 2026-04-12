@@ -105,7 +105,7 @@ function diffNode(base: IRNode, variant: IRNode): ResponsiveVariants[string] | n
  * Apply responsive overrides on `base`. Each variant doc is matched
  * node-by-node and any differences are recorded under
  * `node.responsive[breakpoint]`. Variants whose nodes are missing in the
- * base are marked `hidden: false` (we can't introduce nodes here, so
+ * base are marked `hidden: true` (we can't introduce nodes here, so
  * they're skipped — that's a future enhancement).
  */
 export function inferResponsive(
