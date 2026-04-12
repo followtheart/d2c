@@ -1,0 +1,80 @@
+{
+  "_class": "page",
+  "do_objectID": "page-1",
+  "name": "Home",
+  "frame": { "x": 0, "y": 0, "width": 0, "height": 0 },
+  "layers": [
+    {
+      "_class": "artboard",
+      "do_objectID": "artboard-1",
+      "name": "HomeScreen",
+      "frame": { "x": 0, "y": 0, "width": 320, "height": 240 },
+      "style": {
+        "fills": [
+          {
+            "_class": "fill",
+            "isEnabled": true,
+            "fillType": 0,
+            "color": { "red": 1, "green": 1, "blue": 1, "alpha": 1 }
+          }
+        ]
+      },
+      "layers": [
+        {
+          "_class": "rectangle",
+          "do_objectID": "header",
+          "name": "header",
+          "frame": { "x": 0, "y": 0, "width": 320, "height": 56 },
+          "fixedRadius": 0,
+          "style": {
+            "fills": [
+              {
+                "_class": "fill",
+                "isEnabled": true,
+                "fillType": 0,
+                "color": { "red": 0.06, "green": 0.09, "blue": 0.16, "alpha": 1 }
+              }
+            ]
+          }
+        },
+        {
+          "_class": "text",
+          "do_objectID": "title",
+          "name": "Title",
+          "frame": { "x": 16, "y": 64, "width": 200, "height": 24 },
+          "stringValue": "Welcome",
+          "style": {
+            "textStyle": {
+              "encodedAttributes": {
+                "MSAttributedStringFontAttribute": {
+                  "attributes": { "name": "Inter-Bold", "size": 18 }
+                },
+                "MSAttributedStringColorAttribute": {
+                  "red": 1, "green": 1, "blue": 1, "alpha": 1
+                },
+                "paragraphStyle": { "alignment": 0 }
+              }
+            }
+          }
+        },
+        {
+          "_class": "rectangle",
+          "do_objectID": "card",
+          "name": "card",
+          "frame": { "x": 16, "y": 96, "width": 288, "height": 128 },
+          "fixedRadius": 12,
+          "style": {
+            "fills": [
+              {
+                "_class": "fill",
+                "isEnabled": true,
+                "fillType": 0,
+                "color": { "red": 0.95, "green": 0.96, "blue": 0.97, "alpha": 1 }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
