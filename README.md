@@ -88,6 +88,17 @@ node dist/cli.js --input examples/sample-design.json --platform react --out - --
 # Use Claude to refine semantic annotations (requires ANTHROPIC_API_KEY)
 ANTHROPIC_API_KEY=sk-ant-... node dist/cli.js \
     --input examples/sample-design.json --platform react --out out/react --use-claude
+
+# Use any provider supported by @node-llm/core (OpenRouter / DeepSeek / OpenAI /
+# Gemini / Mistral / xAI / Bedrock / local Ollama). The relevant *_API_KEY env
+# var is read automatically. Requires `npm install @node-llm/core` first.
+OPENROUTER_API_KEY=sk-or-... node dist/cli.js \
+    --input examples/sample-design.json --platform react --out out/react \
+    --llm-provider openrouter --llm-model anthropic/claude-3.5-sonnet
+
+DEEPSEEK_API_KEY=sk-... node dist/cli.js \
+    --input examples/sample-design.json --platform react --out out/react \
+    --llm-provider deepseek --llm-model deepseek-chat
 ```
 
 ## CLI options
@@ -107,6 +118,11 @@ ANTHROPIC_API_KEY=sk-ant-... node dist/cli.js \
                                  (repeatable, e.g. --responsive sm=mobile.json)
       --prev-ir <file>           Previous IR JSON for ai:ignore region merge
       --use-claude               Use Claude for the semantic LLM pass
+      --llm-provider <name>      Use @node-llm/core: openai | anthropic |
+                                 gemini | deepseek | openrouter | ollama |
+                                 mistral | xai | bedrock
+      --llm-model <id>           Model id for --llm-provider
+      --llm-base-url <url>       Override base URL (gateways / Ollama)
   -v, --verbose
   -h, --help
 ```
@@ -139,18 +155,34 @@ node dist/cli.js -i examples/sketch-sample.json -f sketch -p react -o out/sketch
 ## Using as a library
 
 ```ts
-import { runPipeline, ClaudeProvider } from 'd2c';
+import { runPipeline, ClaudeProvider, NodeLlmProvider } from 'd2c';
 import designJson from './design.json';
 
 const { ir, generated } = await runPipeline(designJson, {
   platform: 'react',
+  // Pick any provider supported by @node-llm/core:
   // llm: new ClaudeProvider({ apiKey: process.env.ANTHROPIC_API_KEY! }),
+  // llm: new NodeLlmProvider({
+  //   provider: 'openrouter',
+  //   model: 'anthropic/claude-3.5-sonnet',
+  //   apiKey: process.env.OPENROUTER_API_KEY!,
+  // }),
+  // llm: new NodeLlmProvider({
+  //   provider: 'deepseek',
+  //   model: 'deepseek-chat',
+  //   apiKey: process.env.DEEPSEEK_API_KEY!,
+  // }),
 });
 
 for (const file of generated.files) {
   console.log(file.path, file.content);
 }
 ```
+
+> The `NodeLlmProvider` route uses [`@node-llm/core`](https://www.npmjs.com/package/@node-llm/core),
+> a provider-agnostic LLM engine for Node.js. It is declared as an **optional**
+> peer dependency — install it with `npm install @node-llm/core` only if you
+> actually plan to call OpenRouter, DeepSeek, Gemini, Ollama, etc. from d2c.
 
 ## The native design format
 
@@ -203,9 +235,15 @@ Given absolute coordinates and sizes, the inference engine (`src/layout/inferenc
    - Auto-assigns `PascalCase` component names
 2. **LLM pass** (optional, via `LLMProvider`):
    - Sends the IR to an LLM and merges returned per-id semantic annotations.
-   - `ClaudeProvider` ships out of the box (`src/ai/claudeProvider.ts`).
-   - Users can plug in OpenAI, Qwen-VL, local vLLM, etc. by implementing a
-     one-method interface.
+   - `ClaudeProvider` ships out of the box (`src/ai/claudeProvider.ts`),
+     hand-rolled on top of Node 22's `fetch` (zero deps).
+   - `NodeLlmProvider` (`src/ai/nodeLlmProvider.ts`) bridges to
+     [`@node-llm/core`](https://www.npmjs.com/package/@node-llm/core), giving
+     d2c instant access to **OpenAI, Anthropic, Gemini, DeepSeek, OpenRouter
+     (540+ models), Ollama, Mistral, xAI and Bedrock** through a single API.
+     `@node-llm/core` is an *optional* peer dependency — install it on demand.
+   - Users can also plug in any custom backend (Qwen-VL, local vLLM, etc.) by
+     implementing the one-method `LLMProvider` interface.
 
 ## Adding new targets
 

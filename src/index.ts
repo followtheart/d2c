@@ -8,6 +8,11 @@ export type { ResponsiveVariantInput } from './layout/responsive';
 export { enhance, NoopLLMProvider } from './ai/semanticEnhancer';
 export type { LLMProvider } from './ai/semanticEnhancer';
 export { ClaudeProvider } from './ai/claudeProvider';
+export { NodeLlmProvider } from './ai/nodeLlmProvider';
+export type {
+  NodeLlmProviderConfig,
+  NodeLlmProviderName,
+} from './ai/nodeLlmProvider';
 export { matchComponents } from './ai/componentMatch';
 export type { LibraryTarget, ComponentRule } from './ai/componentMatch';
 export {
