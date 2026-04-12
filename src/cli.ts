@@ -14,6 +14,10 @@ import { runPipeline } from './pipeline/d2cPipeline';
 import type { Platform } from './codegen/factory';
 import type { DesignFormat } from './parser';
 import { ClaudeProvider } from './ai/claudeProvider';
+import {
+  NodeLlmProvider,
+  type NodeLlmProviderName,
+} from './ai/nodeLlmProvider';
 import type { LLMProvider } from './ai/semanticEnhancer';
 
 interface Args {
@@ -29,6 +33,9 @@ interface Args {
   responsive: { breakpoint: string; file: string }[];
   prevIR?: string;
   useClaude?: boolean;
+  llmProvider?: NodeLlmProviderName;
+  llmModel?: string;
+  llmBaseUrl?: string;
   verbose?: boolean;
   help?: boolean;
 }
@@ -84,6 +91,15 @@ function parseArgs(argv: string[]): Args {
       case '--use-claude':
         args.useClaude = true;
         break;
+      case '--llm-provider':
+        args.llmProvider = next() as NodeLlmProviderName;
+        break;
+      case '--llm-model':
+        args.llmModel = next();
+        break;
+      case '--llm-base-url':
+        args.llmBaseUrl = next();
+        break;
       case '--verbose':
       case '-v':
         args.verbose = true;
@@ -120,6 +136,17 @@ Options:
       --prev-ir <file>           Previous IR JSON for ai:ignore region merge
       --use-claude               Use Claude as the semantic LLM provider
                                  (requires ANTHROPIC_API_KEY env var)
+      --llm-provider <name>      Use @node-llm/core as the semantic LLM
+                                 provider. Supports: openai | anthropic |
+                                 gemini | deepseek | openrouter | ollama |
+                                 mistral | xai | bedrock. The matching API
+                                 key env var (e.g. OPENROUTER_API_KEY,
+                                 DEEPSEEK_API_KEY) is read automatically.
+                                 Requires "npm install @node-llm/core".
+      --llm-model <id>           Model id passed to --llm-provider
+                                 (e.g. deepseek-chat, openai/gpt-4o-mini)
+      --llm-base-url <url>       Override the provider base URL (e.g. for
+                                 self-hosted gateways or Ollama)
   -v, --verbose                  Verbose logging
   -h, --help                     Show this help
 
@@ -131,6 +158,10 @@ Examples:
   d2c -i design.json --component-library antd -p react -o out/antd
   d2c -i design.json --emit-tokens out/tokens.json --emit-tailwind out/preset.js
   d2c -i design.json --responsive sm=mobile.json --responsive lg=desktop.json -o out
+  OPENROUTER_API_KEY=... d2c -i design.json --llm-provider openrouter \\
+    --llm-model anthropic/claude-3.5-sonnet -o out/react
+  DEEPSEEK_API_KEY=... d2c -i design.json --llm-provider deepseek \\
+    --llm-model deepseek-chat -o out/react
 `;
 
 async function main(): Promise<void> {
@@ -151,6 +182,10 @@ async function main(): Promise<void> {
   const raw = JSON.parse(fs.readFileSync(args.input, 'utf8'));
 
   let llm: LLMProvider | undefined;
+  if (args.useClaude && args.llmProvider) {
+    console.error('ERROR: --use-claude and --llm-provider are mutually exclusive.');
+    process.exit(2);
+  }
   if (args.useClaude) {
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
@@ -158,6 +193,21 @@ async function main(): Promise<void> {
       process.exit(2);
     }
     llm = new ClaudeProvider({ apiKey });
+  } else if (args.llmProvider) {
+    const apiKey = pickApiKey(args.llmProvider);
+    if (!apiKey && args.llmProvider !== 'ollama') {
+      console.error(
+        `ERROR: --llm-provider ${args.llmProvider} requires the matching API key ` +
+          `env var (e.g. ${apiKeyEnvVarFor(args.llmProvider)}).`,
+      );
+      process.exit(2);
+    }
+    llm = new NodeLlmProvider({
+      provider: args.llmProvider,
+      model: args.llmModel,
+      apiKey,
+      baseUrl: args.llmBaseUrl,
+    });
   }
 
   // Pre-parse responsive variants (each one runs through Parse + Layout
@@ -231,6 +281,34 @@ async function main(): Promise<void> {
 function writeFile(p: string, content: string): void {
   fs.mkdirSync(path.dirname(p) || '.', { recursive: true });
   fs.writeFileSync(p, content);
+}
+
+function apiKeyEnvVarFor(provider: NodeLlmProviderName): string {
+  switch (provider) {
+    case 'openai':
+      return 'OPENAI_API_KEY';
+    case 'anthropic':
+      return 'ANTHROPIC_API_KEY';
+    case 'gemini':
+      return 'GEMINI_API_KEY';
+    case 'deepseek':
+      return 'DEEPSEEK_API_KEY';
+    case 'openrouter':
+      return 'OPENROUTER_API_KEY';
+    case 'mistral':
+      return 'MISTRAL_API_KEY';
+    case 'xai':
+      return 'XAI_API_KEY';
+    case 'bedrock':
+      return 'BEDROCK_API_KEY';
+    case 'ollama':
+      return '';
+  }
+}
+
+function pickApiKey(provider: NodeLlmProviderName): string | undefined {
+  const name = apiKeyEnvVarFor(provider);
+  return name ? process.env[name] : undefined;
 }
 
 main().catch((e) => {
