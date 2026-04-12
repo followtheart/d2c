@@ -152,6 +152,104 @@ node dist/cli.js -i examples/sample-design.json \
 node dist/cli.js -i examples/sketch-sample.json -f sketch -p react -o out/sketch
 ```
 
+## LLM API Token 配置
+
+语义增强（Semantic Enhancement）是可选步骤，需要配置 LLM API Key 才能启用。
+d2c 提供两条 LLM 接入路径：**内置 Claude Provider** 和 **NodeLlmProvider（多厂商）**，
+二者互斥，不能同时使用。
+
+### 方式一：内置 Claude Provider（`--use-claude`）
+
+仅支持 Anthropic Claude，直接读取环境变量 `ANTHROPIC_API_KEY`。
+
+```bash
+# Linux / macOS
+export ANTHROPIC_API_KEY=sk-ant-api03-xxxxx
+
+# Windows PowerShell
+$env:ANTHROPIC_API_KEY = "sk-ant-api03-xxxxx"
+
+# 然后运行
+node dist/cli.js -i examples/sample-design.json -p react -o out/react --use-claude
+```
+
+| 配置项 | 值 |
+|--------|---|
+| 环境变量 | `ANTHROPIC_API_KEY` |
+| 默认模型 | `claude-opus-4-6` |
+| 默认端点 | `https://api.anthropic.com/v1/messages` |
+
+### 方式二：NodeLlmProvider（`--llm-provider`）
+
+通过 [`@node-llm/core`](https://www.npmjs.com/package/@node-llm/core) 接入
+9 种 LLM 厂商。须先安装可选依赖：
+
+```bash
+npm install @node-llm/core
+```
+
+各厂商对应的**环境变量**与**默认模型**如下：
+
+| `--llm-provider` | 环境变量 | 默认模型 |
+|-------------------|----------|----------|
+| `openai` | `OPENAI_API_KEY` | `gpt-4o-mini` |
+| `anthropic` | `ANTHROPIC_API_KEY` | `claude-3-5-sonnet-latest` |
+| `gemini` | `GEMINI_API_KEY` | `gemini-1.5-flash` |
+| `deepseek` | `DEEPSEEK_API_KEY` | `deepseek-chat` |
+| `openrouter` | `OPENROUTER_API_KEY` | `openai/gpt-4o-mini` |
+| `mistral` | `MISTRAL_API_KEY` | `mistral-small-latest` |
+| `xai` | `XAI_API_KEY` | `grok-2-latest` |
+| `bedrock` | `BEDROCK_API_KEY` | `anthropic.claude-3-5-sonnet-20240620-v1:0` |
+| `ollama` | 不需要（本地运行） | `llama3.1` |
+
+使用示例：
+
+```bash
+# OpenRouter
+export OPENROUTER_API_KEY=sk-or-xxxxx
+node dist/cli.js -i examples/sample-design.json -p react -o out/react \
+    --llm-provider openrouter --llm-model anthropic/claude-3.5-sonnet
+
+# DeepSeek
+export DEEPSEEK_API_KEY=sk-xxxxx
+node dist/cli.js -i examples/sample-design.json -p react -o out/react \
+    --llm-provider deepseek
+
+# 本地 Ollama（无需 API Key）
+node dist/cli.js -i examples/sample-design.json -p react -o out/react \
+    --llm-provider ollama --llm-model llama3.1 --llm-base-url http://localhost:11434
+
+# 自定义网关 / 代理
+export OPENAI_API_KEY=sk-xxxxx
+node dist/cli.js -i examples/sample-design.json -p react -o out/react \
+    --llm-provider openai --llm-base-url https://your-gateway.example.com/v1
+```
+
+### 作为库使用时传入 API Key
+
+```ts
+import { runPipeline, ClaudeProvider, NodeLlmProvider } from 'd2c';
+
+// Claude
+const { ir, generated } = await runPipeline(designJson, {
+  platform: 'react',
+  llm: new ClaudeProvider({ apiKey: process.env.ANTHROPIC_API_KEY! }),
+});
+
+// NodeLlmProvider（以 OpenRouter 为例）
+const result = await runPipeline(designJson, {
+  platform: 'react',
+  llm: new NodeLlmProvider({
+    provider: 'openrouter',
+    model: 'anthropic/claude-3.5-sonnet',
+    apiKey: process.env.OPENROUTER_API_KEY!,
+  }),
+});
+```
+
+> **注意：** `--use-claude` 和 `--llm-provider` 不能同时使用，CLI 会报错退出。
+> 如果不传任何 LLM 参数，d2c 仍会运行，只是跳过 LLM 语义增强步骤，仅使用规则引擎。
+
 ## Using as a library
 
 ```ts
