@@ -91,7 +91,7 @@ ANTHROPIC_API_KEY=sk-ant-... node dist/cli.js \
 
 # Use any provider supported by @node-llm/core (OpenRouter / DeepSeek / OpenAI /
 # Gemini / Mistral / xAI / Bedrock / local Ollama). The relevant *_API_KEY env
-# var is read automatically. Requires `npm install @node-llm/core` first.
+# var is read automatically. @node-llm/core is auto-installed as optional dep.
 OPENROUTER_API_KEY=sk-or-... node dist/cli.js \
     --input examples/sample-design.json --platform react --out out/react \
     --llm-provider openrouter --llm-model anthropic/claude-3.5-sonnet
@@ -158,69 +158,115 @@ node dist/cli.js -i examples/sketch-sample.json -f sketch -p react -o out/sketch
 d2c 提供两条 LLM 接入路径：**内置 Claude Provider** 和 **NodeLlmProvider（多厂商）**，
 二者互斥，不能同时使用。
 
-### 方式一：内置 Claude Provider（`--use-claude`）
+API Key 的读取优先级为：**CLI 参数 / 环境变量 > 配置文件（`.d2crc.json`）**。
 
-仅支持 Anthropic Claude，直接读取环境变量 `ANTHROPIC_API_KEY`。
+### 配置文件（`.d2crc.json`）
+
+d2c 会按以下顺序查找配置文件（找到第一个即停止）：
+
+1. 当前工作目录下的 `.d2crc.json`
+2. 用户主目录下的 `~/.d2crc.json`
+
+配置文件格式：
+
+```json
+{
+  "apiKeys": {
+    "anthropic": "sk-ant-api03-xxxxx",
+    "openrouter": "sk-or-xxxxx",
+    "deepseek": "sk-xxxxx",
+    "openai": "sk-xxxxx",
+    "gemini": "AIza-xxxxx",
+    "mistral": "xxxxx",
+    "xai": "xxxxx",
+    "bedrock": "xxxxx"
+  },
+  "llm": {
+    "provider": "openrouter",
+    "model": "anthropic/claude-3.5-sonnet",
+    "baseUrl": "https://custom-gateway.example.com/v1"
+  }
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| `apiKeys.<provider>` | 各厂商的 API Key，可只填需要的 |
+| `llm.provider` | 默认 LLM 供应商（可被 `--llm-provider` 覆盖） |
+| `llm.model` | 默认模型 id（可被 `--llm-model` 覆盖） |
+| `llm.baseUrl` | 默认端点 URL（可被 `--llm-base-url` 覆盖） |
+
+配置完成后，只需运行：
 
 ```bash
-# Linux / macOS
+# 无需在命令行传 provider / key，全部从 .d2crc.json 读取
+node dist/cli.js -i examples/sample-design.json -p react -o out/react
+```
+
+> **安全提示：** `.d2crc.json` 包含敏感密钥，请勿提交到版本控制。
+> 建议将 `.d2crc.json` 加入 `.gitignore`。
+
+### 方式一：内置 Claude Provider（`--use-claude`）
+
+仅支持 Anthropic Claude，从环境变量 `ANTHROPIC_API_KEY` 或配置文件
+`apiKeys.anthropic` 读取密钥。
+
+```bash
+# 通过环境变量
 export ANTHROPIC_API_KEY=sk-ant-api03-xxxxx
+node dist/cli.js -i examples/sample-design.json -p react -o out/react --use-claude
 
-# Windows PowerShell
-$env:ANTHROPIC_API_KEY = "sk-ant-api03-xxxxx"
-
-# 然后运行
+# 或通过 .d2crc.json（apiKeys.anthropic 已配置）
 node dist/cli.js -i examples/sample-design.json -p react -o out/react --use-claude
 ```
 
 | 配置项 | 值 |
 |--------|---|
 | 环境变量 | `ANTHROPIC_API_KEY` |
+| 配置文件字段 | `apiKeys.anthropic` |
 | 默认模型 | `claude-opus-4-6` |
 | 默认端点 | `https://api.anthropic.com/v1/messages` |
 
 ### 方式二：NodeLlmProvider（`--llm-provider`）
 
 通过 [`@node-llm/core`](https://www.npmjs.com/package/@node-llm/core) 接入
-9 种 LLM 厂商。须先安装可选依赖：
+9 种 LLM 厂商。`@node-llm/core` 已作为可选依赖（`optionalDependencies`），
+执行 `npm install` 时会自动安装。
 
-```bash
-npm install @node-llm/core
-```
+各厂商对应的**环境变量**、**配置文件字段**与**默认模型**如下：
 
-各厂商对应的**环境变量**与**默认模型**如下：
-
-| `--llm-provider` | 环境变量 | 默认模型 |
-|-------------------|----------|----------|
-| `openai` | `OPENAI_API_KEY` | `gpt-4o-mini` |
-| `anthropic` | `ANTHROPIC_API_KEY` | `claude-3-5-sonnet-latest` |
-| `gemini` | `GEMINI_API_KEY` | `gemini-1.5-flash` |
-| `deepseek` | `DEEPSEEK_API_KEY` | `deepseek-chat` |
-| `openrouter` | `OPENROUTER_API_KEY` | `openai/gpt-4o-mini` |
-| `mistral` | `MISTRAL_API_KEY` | `mistral-small-latest` |
-| `xai` | `XAI_API_KEY` | `grok-2-latest` |
-| `bedrock` | `BEDROCK_API_KEY` | `anthropic.claude-3-5-sonnet-20240620-v1:0` |
-| `ollama` | 不需要（本地运行） | `llama3.1` |
+| `--llm-provider` | 环境变量 | `.d2crc.json` 字段 | 默认模型 |
+|-------------------|----------|---------------------|----------|
+| `openai` | `OPENAI_API_KEY` | `apiKeys.openai` | `gpt-4o-mini` |
+| `anthropic` | `ANTHROPIC_API_KEY` | `apiKeys.anthropic` | `claude-3-5-sonnet-latest` |
+| `gemini` | `GEMINI_API_KEY` | `apiKeys.gemini` | `gemini-1.5-flash` |
+| `deepseek` | `DEEPSEEK_API_KEY` | `apiKeys.deepseek` | `deepseek-chat` |
+| `openrouter` | `OPENROUTER_API_KEY` | `apiKeys.openrouter` | `openai/gpt-4o-mini` |
+| `mistral` | `MISTRAL_API_KEY` | `apiKeys.mistral` | `mistral-small-latest` |
+| `xai` | `XAI_API_KEY` | `apiKeys.xai` | `grok-2-latest` |
+| `bedrock` | `BEDROCK_API_KEY` | `apiKeys.bedrock` | `anthropic.claude-3-5-sonnet-20240620-v1:0` |
+| `ollama` | 不需要 | 不需要 | `llama3.1` |
 
 使用示例：
 
 ```bash
-# OpenRouter
+# 纯命令行 + 环境变量
 export OPENROUTER_API_KEY=sk-or-xxxxx
 node dist/cli.js -i examples/sample-design.json -p react -o out/react \
     --llm-provider openrouter --llm-model anthropic/claude-3.5-sonnet
 
-# DeepSeek
-export DEEPSEEK_API_KEY=sk-xxxxx
+# 使用 .d2crc.json（provider / model / apiKey 已在配置文件中）
+node dist/cli.js -i examples/sample-design.json -p react -o out/react
+
+# 配置文件中设了 provider=deepseek，命令行覆盖 model
 node dist/cli.js -i examples/sample-design.json -p react -o out/react \
-    --llm-provider deepseek
+    --llm-model deepseek-reasoner
 
 # 本地 Ollama（无需 API Key）
 node dist/cli.js -i examples/sample-design.json -p react -o out/react \
     --llm-provider ollama --llm-model llama3.1 --llm-base-url http://localhost:11434
 
 # 自定义网关 / 代理
-export OPENAI_API_KEY=sk-xxxxx
 node dist/cli.js -i examples/sample-design.json -p react -o out/react \
     --llm-provider openai --llm-base-url https://your-gateway.example.com/v1
 ```
@@ -228,27 +274,30 @@ node dist/cli.js -i examples/sample-design.json -p react -o out/react \
 ### 作为库使用时传入 API Key
 
 ```ts
-import { runPipeline, ClaudeProvider, NodeLlmProvider } from 'd2c';
+import { runPipeline, ClaudeProvider, NodeLlmProvider, loadConfig, resolveApiKey } from 'd2c';
 
-// Claude
+// 直接传入 API Key
 const { ir, generated } = await runPipeline(designJson, {
   platform: 'react',
   llm: new ClaudeProvider({ apiKey: process.env.ANTHROPIC_API_KEY! }),
 });
 
-// NodeLlmProvider（以 OpenRouter 为例）
+// 从 .d2crc.json 读取
+const config = loadConfig();
+const apiKey = resolveApiKey('openrouter', 'OPENROUTER_API_KEY', config);
 const result = await runPipeline(designJson, {
   platform: 'react',
   llm: new NodeLlmProvider({
     provider: 'openrouter',
     model: 'anthropic/claude-3.5-sonnet',
-    apiKey: process.env.OPENROUTER_API_KEY!,
+    apiKey,
   }),
 });
 ```
 
 > **注意：** `--use-claude` 和 `--llm-provider` 不能同时使用，CLI 会报错退出。
-> 如果不传任何 LLM 参数，d2c 仍会运行，只是跳过 LLM 语义增强步骤，仅使用规则引擎。
+> 如果不传任何 LLM 参数且配置文件中也未设置 `llm.provider`，d2c 仍会运行，
+> 只是跳过 LLM 语义增强步骤，仅使用规则引擎。
 
 ## Using as a library
 
@@ -278,9 +327,8 @@ for (const file of generated.files) {
 ```
 
 > The `NodeLlmProvider` route uses [`@node-llm/core`](https://www.npmjs.com/package/@node-llm/core),
-> a provider-agnostic LLM engine for Node.js. It is declared as an **optional**
-> peer dependency — install it with `npm install @node-llm/core` only if you
-> actually plan to call OpenRouter, DeepSeek, Gemini, Ollama, etc. from d2c.
+> a provider-agnostic LLM engine for Node.js。它作为 `optionalDependencies` 声明，
+> `npm install` 时会自动安装。如需跳过，可执行 `npm install --omit=optional`。
 
 ## The native design format
 

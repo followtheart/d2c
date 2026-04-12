@@ -19,6 +19,7 @@ import {
   type NodeLlmProviderName,
 } from './ai/nodeLlmProvider';
 import type { LLMProvider } from './ai/semanticEnhancer';
+import { loadConfig, resolveApiKey, type D2CConfig } from './config';
 
 interface Args {
   input?: string;
@@ -33,6 +34,7 @@ interface Args {
   responsive: { breakpoint: string; file: string }[];
   prevIR?: string;
   useClaude?: boolean;
+  noLlm?: boolean;
   llmProvider?: NodeLlmProviderName;
   llmModel?: string;
   llmBaseUrl?: string;
@@ -91,6 +93,9 @@ function parseArgs(argv: string[]): Args {
       case '--use-claude':
         args.useClaude = true;
         break;
+      case '--no-llm':
+        args.noLlm = true;
+        break;
       case '--llm-provider':
         args.llmProvider = next() as NodeLlmProviderName;
         break;
@@ -134,6 +139,7 @@ Options:
       --responsive <bp>=<file>   Add a responsive variant for breakpoint <bp>
                                  (repeatable, e.g. --responsive sm=mobile.json)
       --prev-ir <file>           Previous IR JSON for ai:ignore region merge
+      --no-llm                   Skip LLM semantic enhancement entirely
       --use-claude               Use Claude as the semantic LLM provider
                                  (requires ANTHROPIC_API_KEY env var)
       --llm-provider <name>      Use @node-llm/core as the semantic LLM
@@ -162,7 +168,65 @@ Examples:
     --llm-model anthropic/claude-3.5-sonnet -o out/react
   DEEPSEEK_API_KEY=... d2c -i design.json --llm-provider deepseek \\
     --llm-model deepseek-chat -o out/react
+  d2c -i ./extracted-sketch-dir/ -f sketch -p html -o out/html
+  d2c -i design.json -p html --no-llm -o out/html
 `;
+
+/**
+ * Resolve the --input path into a parsed JSON object.
+ * Supports:
+ *  - A regular JSON file (any format)
+ *  - An extracted .sketch directory (contains pages/*.json)
+ *  - A document.json with MSJSONFileReference page pointers
+ */
+function resolveInput(inputPath: string, format: DesignFormat): unknown {
+  const stat = fs.statSync(inputPath);
+  if (stat.isDirectory()) {
+    return resolveSketchDir(inputPath);
+  }
+  const raw = JSON.parse(fs.readFileSync(inputPath, 'utf8'));
+  if (format === 'sketch' || format === 'auto') {
+    const obj = raw as Record<string, unknown>;
+    if (Array.isArray(obj.pages) && obj.pages.length > 0) {
+      const first = obj.pages[0] as Record<string, unknown>;
+      if (first._class === 'MSJSONFileReference' && typeof first._ref === 'string') {
+        const baseDir = path.dirname(inputPath);
+        return resolveSketchDocumentRefs(obj, baseDir);
+      }
+    }
+  }
+  return raw;
+}
+
+function resolveSketchDir(dirPath: string): unknown {
+  const pagesDir = path.join(dirPath, 'pages');
+  if (!fs.existsSync(pagesDir)) {
+    throw new Error(`Sketch directory "${dirPath}" has no pages/ subdirectory`);
+  }
+  const pageFiles = fs.readdirSync(pagesDir).filter((f) => f.endsWith('.json'));
+  if (pageFiles.length === 0) {
+    throw new Error(`No page JSON files found in "${pagesDir}"`);
+  }
+  const pages = pageFiles.map((f) =>
+    JSON.parse(fs.readFileSync(path.join(pagesDir, f), 'utf8')),
+  );
+  return pages.length === 1 ? pages[0] : { pages };
+}
+
+function resolveSketchDocumentRefs(
+  doc: Record<string, unknown>,
+  baseDir: string,
+): unknown {
+  const refs = doc.pages as { _class: string; _ref: string }[];
+  const pages = refs.map((ref) => {
+    const filePath = path.join(baseDir, ref._ref + '.json');
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`Referenced page file not found: ${filePath}`);
+    }
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  });
+  return pages.length === 1 ? pages[0] : { pages };
+}
 
 async function main(): Promise<void> {
   let args: Args;
@@ -179,34 +243,44 @@ async function main(): Promise<void> {
     process.exit(args.help ? 0 : 1);
   }
 
-  const raw = JSON.parse(fs.readFileSync(args.input, 'utf8'));
+  const raw = resolveInput(args.input, args.format);
+
+  // Load config file (.d2crc.json) — values are used as fallbacks.
+  const config = loadConfig();
+
+  // CLI args override config-file defaults for provider / model / baseUrl.
+  const effectiveProvider = args.llmProvider ?? config.llm?.provider;
+  const effectiveModel = args.llmModel ?? config.llm?.model;
+  const effectiveBaseUrl = args.llmBaseUrl ?? config.llm?.baseUrl;
 
   let llm: LLMProvider | undefined;
-  if (args.useClaude && args.llmProvider) {
+  if (args.noLlm) {
+    // --no-llm: skip LLM regardless of config
+  } else if (args.useClaude && effectiveProvider) {
     console.error('ERROR: --use-claude and --llm-provider are mutually exclusive.');
     process.exit(2);
   }
   if (args.useClaude) {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
+    const apiKey = resolveApiKey('anthropic', 'ANTHROPIC_API_KEY', config);
     if (!apiKey) {
-      console.error('ERROR: --use-claude requires ANTHROPIC_API_KEY env var.');
+      console.error('ERROR: --use-claude requires ANTHROPIC_API_KEY env var or apiKeys.anthropic in .d2crc.json.');
       process.exit(2);
     }
     llm = new ClaudeProvider({ apiKey });
-  } else if (args.llmProvider) {
-    const apiKey = pickApiKey(args.llmProvider);
-    if (!apiKey && args.llmProvider !== 'ollama') {
+  } else if (!args.noLlm && effectiveProvider) {
+    const apiKey = pickApiKey(effectiveProvider, config);
+    if (!apiKey && effectiveProvider !== 'ollama') {
       console.error(
-        `ERROR: --llm-provider ${args.llmProvider} requires the matching API key ` +
-          `env var (e.g. ${apiKeyEnvVarFor(args.llmProvider)}).`,
+        `ERROR: --llm-provider ${effectiveProvider} requires the matching API key ` +
+          `env var (e.g. ${apiKeyEnvVarFor(effectiveProvider)}) or apiKeys.${effectiveProvider} in .d2crc.json.`,
       );
       process.exit(2);
     }
     llm = new NodeLlmProvider({
-      provider: args.llmProvider,
-      model: args.llmModel,
+      provider: effectiveProvider,
+      model: effectiveModel,
       apiKey,
-      baseUrl: args.llmBaseUrl,
+      baseUrl: effectiveBaseUrl,
     });
   }
 
@@ -306,9 +380,9 @@ function apiKeyEnvVarFor(provider: NodeLlmProviderName): string {
   }
 }
 
-function pickApiKey(provider: NodeLlmProviderName): string | undefined {
-  const name = apiKeyEnvVarFor(provider);
-  return name ? process.env[name] : undefined;
+function pickApiKey(provider: NodeLlmProviderName, config: D2CConfig): string | undefined {
+  const envName = apiKeyEnvVarFor(provider);
+  return resolveApiKey(provider, envName, config);
 }
 
 main().catch((e) => {

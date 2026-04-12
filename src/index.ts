@@ -36,3 +36,5 @@ export { diffIR, mergeProtectedRegions, formatDiff } from './diff/merge';
 export type { IRDiffEntry } from './diff/merge';
 export { runPipeline } from './pipeline/d2cPipeline';
 export type { PipelineOptions, PipelineResult } from './pipeline/d2cPipeline';
+export { loadConfig, resolveApiKey } from './config';
+export type { D2CConfig } from './config';

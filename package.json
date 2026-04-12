@@ -28,12 +28,12 @@
     "@types/node": "^22.0.0",
     "typescript": "^5.4.0"
   },
-  "peerDependencies": {
-    "@node-llm/core": ">=1.15.0"
-  },
   "peerDependenciesMeta": {
     "@node-llm/core": {
       "optional": true
     }
+  },
+  "optionalDependencies": {
+    "@node-llm/core": ">=1.15.0"
   }
 }
