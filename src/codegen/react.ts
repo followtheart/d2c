@@ -77,10 +77,10 @@ export default ${componentName};
     };
   }
 
-  private renderNode(node: IRNode, indent: number): string {
+  private renderNode(node: IRNode, indent: number, parentLayout?: 'flex' | 'grid' | 'absolute'): string {
     const pad = ' '.repeat(indent);
     const tag = tagFor(node);
-    const classes = this.twClasses(node);
+    const classes = this.twClasses(node, parentLayout);
     const classAttr = classes.length ? ` className="${classes.join(' ')}"` : '';
 
     if (node.type === 'image') {
@@ -98,15 +98,23 @@ export default ${componentName};
     if (node.children.length === 0) {
       return `${pad}<${tag}${classAttr} />`;
     }
-    const children = node.children.map((c) => this.renderNode(c, indent + 2)).join('\n');
+    const childLayout = node.layout.type;
+    const children = node.children.map((c) => this.renderNode(c, indent + 2, childLayout)).join('\n');
     return `${pad}<${tag}${classAttr}>
 ${children}
 ${pad}</${tag}>`;
   }
 
-  private twClasses(node: IRNode): string[] {
+  private twClasses(node: IRNode, parentLayout?: 'flex' | 'grid' | 'absolute'): string[] {
     const classes: string[] = [];
     const { box, layout, style, textStyle } = node;
+
+    // Absolute-positioned child: add absolute + left/top
+    if (parentLayout === 'absolute') {
+      classes.push('absolute');
+      if (box.x) classes.push(`left-[${Math.round(box.x)}px]`);
+      if (box.y) classes.push(`top-[${Math.round(box.y)}px]`);
+    }
 
     // Layout
     if (layout.type === 'flex') {
@@ -133,7 +141,7 @@ ${pad}</${tag}>`;
       classes.push('grid');
       if (layout.columns) classes.push(`grid-cols-${layout.columns}`);
       if (layout.gap) classes.push(`gap-[${Math.round(layout.gap)}px]`);
-    } else if (layout.type === 'absolute') {
+    } else if (layout.type === 'absolute' && parentLayout !== 'absolute') {
       classes.push('relative');
     }
 
@@ -180,6 +188,51 @@ ${pad}</${tag}>`;
         classes.push(`leading-[${Math.round(textStyle.lineHeight)}px]`);
       if (textStyle.textAlign && textStyle.textAlign !== 'left')
         classes.push(`text-${textStyle.textAlign}`);
+    }
+
+    // Responsive breakpoint overrides → Tailwind prefixed classes
+    if (node.responsive) {
+      for (const [bp, overrides] of Object.entries(node.responsive)) {
+        if (overrides.hidden) {
+          classes.push(`${bp}:hidden`);
+          continue;
+        }
+        if (overrides.box) {
+          if (typeof overrides.box.width === 'number')
+            classes.push(`${bp}:w-[${Math.round(overrides.box.width)}px]`);
+          else if (overrides.box.width === 'fill') classes.push(`${bp}:w-full`);
+          if (typeof overrides.box.height === 'number')
+            classes.push(`${bp}:h-[${Math.round(overrides.box.height)}px]`);
+          else if (overrides.box.height === 'fill') classes.push(`${bp}:h-full`);
+          if (overrides.box.padding) {
+            const [pt, pr, pb, pl] = overrides.box.padding;
+            if (pt === pr && pr === pb && pb === pl) {
+              if (pt) classes.push(`${bp}:p-[${pt}px]`);
+            } else {
+              if (pt) classes.push(`${bp}:pt-[${pt}px]`);
+              if (pr) classes.push(`${bp}:pr-[${pr}px]`);
+              if (pb) classes.push(`${bp}:pb-[${pb}px]`);
+              if (pl) classes.push(`${bp}:pl-[${pl}px]`);
+            }
+          }
+        }
+        if (overrides.layout) {
+          if (overrides.layout.direction === 'column') classes.push(`${bp}:flex-col`);
+          else if (overrides.layout.direction === 'row') classes.push(`${bp}:flex-row`);
+          if (overrides.layout.gap !== undefined)
+            classes.push(`${bp}:gap-[${Math.round(overrides.layout.gap)}px]`);
+        }
+        if (overrides.textStyle) {
+          if (overrides.textStyle.fontSize)
+            classes.push(`${bp}:text-[${overrides.textStyle.fontSize}px]`);
+          if (overrides.textStyle.color)
+            classes.push(`${bp}:text-[${overrides.textStyle.color}]`);
+        }
+        if (overrides.style) {
+          if (overrides.style.backgroundColor)
+            classes.push(`${bp}:bg-[${overrides.style.backgroundColor}]`);
+        }
+      }
     }
 
     return classes;

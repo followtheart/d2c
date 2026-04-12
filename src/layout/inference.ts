@@ -2,7 +2,7 @@
  * Layout inference: turn absolute-positioned children into flex/grid layout.
  *
  * Algorithm (rule-based, deterministic):
- *   1. Traverse bottom-up (children first).
+ *   1. Traverse top-down, then recurse into children.
  *   2. For each container whose layout is already flex/grid, recurse.
  *   3. For each absolute container with >=2 children:
  *      - Sort children by x / y

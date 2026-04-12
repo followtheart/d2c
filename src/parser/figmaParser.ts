@@ -148,6 +148,12 @@ function extractTextStyle(figma: FigmaNode): TextStyle | undefined {
   const fill = (figma.fills ?? []).find(
     (f) => f.visible !== false && f.type === 'SOLID',
   );
+  const alignMap: Record<string, 'left' | 'center' | 'right' | 'justify'> = {
+    LEFT: 'left',
+    CENTER: 'center',
+    RIGHT: 'right',
+    JUSTIFIED: 'justify',
+  };
   return {
     content: figma.characters ?? '',
     fontFamily: s.fontFamily,
@@ -157,7 +163,7 @@ function extractTextStyle(figma: FigmaNode): TextStyle | undefined {
     lineHeight: s.lineHeightPx,
     letterSpacing: s.letterSpacing,
     textAlign: s.textAlignHorizontal
-      ? (s.textAlignHorizontal.toLowerCase() as any)
+      ? alignMap[s.textAlignHorizontal]
       : undefined,
   };
 }
