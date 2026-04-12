@@ -1,0 +1,83 @@
+{
+  "name": "UserCard",
+  "width": 320,
+  "height": 600,
+  "root": {
+    "id": "root",
+    "name": "card",
+    "type": "container",
+    "x": 0,
+    "y": 0,
+    "width": 320,
+    "height": 600,
+    "background": "#ffffff",
+    "borderRadius": 12,
+    "padding": 16,
+    "children": [
+      {
+        "id": "header",
+        "name": "Header",
+        "type": "container",
+        "x": 16,
+        "y": 16,
+        "width": 288,
+        "height": 80,
+        "children": [
+          {
+            "id": "avatar",
+            "name": "Avatar",
+            "type": "image",
+            "src": "https://i.pravatar.cc/96",
+            "x": 16,
+            "y": 16,
+            "width": 48,
+            "height": 48,
+            "borderRadius": 24
+          },
+          {
+            "id": "name",
+            "name": "Name",
+            "x": 80,
+            "y": 24,
+            "width": 200,
+            "height": 24,
+            "text": {
+              "content": "Ada Lovelace",
+              "fontSize": 18,
+              "fontWeight": 700,
+              "color": "#0f172a"
+            }
+          },
+          {
+            "id": "handle",
+            "name": "Handle",
+            "x": 80,
+            "y": 48,
+            "width": 200,
+            "height": 16,
+            "text": {
+              "content": "@ada",
+              "fontSize": 12,
+              "fontWeight": 400,
+              "color": "#64748b"
+            }
+          }
+        ]
+      },
+      {
+        "id": "bio",
+        "name": "Bio",
+        "x": 16,
+        "y": 112,
+        "width": 288,
+        "height": 60,
+        "text": {
+          "content": "Mathematician. Writer. First programmer.",
+          "fontSize": 13,
+          "fontWeight": 400,
+          "color": "#334155"
+        }
+      }
+    ]
+  }
+}

@@ -1,8 +1,11 @@
 # d2c — Design-to-Code Converter
 
 An end-to-end **Design-to-Code (D2C)** pipeline that converts design files
-(Figma REST API responses or a simpler "native" design JSON) into working
-**React + Tailwind**, **Vue 3 SFC**, or **HTML + CSS** source code.
+(Figma REST API, Sketch JSON, or a simpler "native" design JSON) into working
+**React + Tailwind**, **Vue 3 SFC**, **HTML + CSS**, **React Native**, or
+**Flutter** source code — with design-token extraction, Tailwind preset
+generation, antd / MUI component matching, responsive breakpoint inference,
+and protected `// ai:ignore` regions for safe regeneration.
 
 Based on the architecture described in [`doc/opus4.6.md`](doc/opus4.6.md) and
 [`doc/qwen3.6.md`](doc/qwen3.6.md):
@@ -35,11 +38,30 @@ Based on the architecture described in [`doc/opus4.6.md`](doc/opus4.6.md) and
    Detects headers/nav/footer, buttons, headings, repeating list patterns,
    and assigns semantic roles / component names. Pluggable `LLMProvider`
    interface; a Claude provider is included out of the box.
-5. **Code generation** (`src/codegen`) — platform-specific renderer that
+5. **Component matching** (`src/ai/componentMatch.ts`, optional) — rule-based
+   detector that maps IR nodes to known component-library components
+   (`antd`, `mui`) so codegen can emit `<Button type="primary">` instead of
+   bespoke divs.
+6. **Responsive inference** (`src/layout/responsive.ts`, optional) — diffs
+   one or more secondary IR documents (different viewports of the same
+   design) against the base and stamps `node.responsive[breakpoint]`
+   overrides on the matching nodes.
+7. **Protected region merge** (`src/diff/merge.ts`, optional) — preserves
+   subtrees marked `semantics.aiIgnore = true` from a previous IR across
+   regenerations and emits a structural diff for CI logs.
+8. **Token extraction** (`src/tokens/extract.ts`) — walks the IR, collects
+   recurring colors, font sizes, spacings, radii and shadows into a
+   deduplicated `TokenSet`, then exposes a `style-dictionary`-shaped JSON
+   and a generated **Tailwind preset** (`src/tokens/tailwindPreset.ts`).
+9. **Code generation** (`src/codegen`) — platform-specific renderer that
    walks the enhanced IR and produces the target code. Ships with:
    - `ReactGenerator` — React + Tailwind CSS (arbitrary values)
    - `VueGenerator` — Vue 3 SFC with `<script setup>` and scoped CSS
    - `HtmlGenerator` — HTML + external stylesheet (with class deduplication)
+   - `ReactNativeGenerator` — `View` / `Text` / `Image` / `Pressable` +
+     `StyleSheet.create`
+   - `FlutterGenerator` — `StatelessWidget` with `Container` / `Row` /
+     `Column` / `Text` / `Image.network`
 
 ## Quickstart
 
@@ -71,14 +93,47 @@ ANTHROPIC_API_KEY=sk-ant-... node dist/cli.js \
 ## CLI options
 
 ```
-  -i, --input <file>      Input design file (JSON)
-  -o, --out <dir|->       Output directory, or '-' for stdout (default: stdout)
-  -p, --platform <name>   Target platform: react | vue | html (default: react)
-  -f, --format <name>     Input format: figma | native | auto (default: auto)
-      --emit-ir <file>    Also write the intermediate IR JSON
-      --use-claude        Use Claude for the semantic LLM pass
+  -i, --input <file>             Input design file (JSON)
+  -o, --out <dir|->              Output directory, or '-' for stdout
+  -p, --platform <name>          Target platform: react | vue | html |
+                                 react-native | flutter (default: react)
+  -f, --format <name>            Input format: figma | sketch | native | auto
+      --emit-ir <file>           Also write the intermediate IR JSON
+      --emit-tokens <file>       Write design tokens (style-dictionary JSON)
+      --emit-tailwind <file>     Write a Tailwind preset (theme.extend) module
+      --emit-diff <file>         Write a structural IR diff against --prev-ir
+      --component-library <lib>  Match nodes to a component library: antd | mui
+      --responsive <bp>=<file>   Add a responsive variant for breakpoint <bp>
+                                 (repeatable, e.g. --responsive sm=mobile.json)
+      --prev-ir <file>           Previous IR JSON for ai:ignore region merge
+      --use-claude               Use Claude for the semantic LLM pass
   -v, --verbose
   -h, --help
+```
+
+### Examples
+
+```bash
+# Flutter widget from the same input
+node dist/cli.js -i examples/sample-design.json -p flutter -o out/flutter
+
+# React Native component
+node dist/cli.js -i examples/sample-design.json -p react-native -o out/rn
+
+# Match antd components and emit React + Tailwind
+node dist/cli.js -i examples/sample-design.json --component-library antd \
+    -p react -o out/antd
+
+# Extract design tokens + Tailwind preset alongside the React output
+node dist/cli.js -i examples/sample-design.json -p react -o out/react \
+    --emit-tokens out/tokens.json --emit-tailwind out/tailwind.preset.js
+
+# Responsive — base + mobile variant → merged IR with sm: overrides
+node dist/cli.js -i examples/sample-design.json \
+    --responsive sm=examples/sample-design-mobile.json -p react -o out/responsive
+
+# Sketch (pre-extracted page JSON from a .sketch ZIP)
+node dist/cli.js -i examples/sketch-sample.json -f sketch -p react -o out/sketch
 ```
 
 ## Using as a library
@@ -166,32 +221,37 @@ Mapped to the phases described in the design docs:
 
 - [x] **P0**: IR, native + Figma parsing, layout inference, React/Vue/HTML
       generation, end-to-end tests
-- [ ] **P1**: Sketch `.sketch` ZIP parser, proper nested-group layout
-      inference, Tailwind preset / theme extraction, visual regression
-      via Playwright
-- [ ] **P2**: Design tokens extraction (`style-dictionary`), IR diff +
-      `// ai:ignore` protected regions, component library matching
-      (antd / MUI)
-- [ ] **P3**: Flutter / SwiftUI / React Native generators, responsive
-      breakpoint inference
+- [x] **P1**: Sketch parser (pre-extracted JSON), Tailwind preset / theme
+      extraction. _Open: ZIP-level `.sketch` reader, Playwright visual
+      regression._
+- [x] **P2**: Design tokens extraction (`style-dictionary` shape),
+      IR diff + `// ai:ignore` protected regions, component library
+      matching (antd / MUI).
+- [x] **P3**: React Native + Flutter generators, responsive breakpoint
+      inference (multi-viewport diff). _Open: SwiftUI generator._
 
 ## Directory layout
 
 ```
 src/
 ├── ir/            # Intermediate representation types & runtime validation
-├── parser/        # Figma + native design JSON parsers
-├── layout/        # Deterministic layout inference engine
-├── ai/            # Rule-based + optional LLM semantic enhancer
-├── codegen/       # React, Vue, HTML generators (pluggable)
+├── parser/        # Figma + Sketch + native design JSON parsers
+├── layout/        # Deterministic layout inference + responsive merge
+├── ai/            # Rule-based + optional LLM semantic enhancer +
+│                  # antd/MUI component matching
+├── tokens/        # Design token extraction + Tailwind preset generator
+├── diff/          # IR diff + ai:ignore protected region merge
+├── codegen/       # React, Vue, HTML, React Native, Flutter generators
 ├── pipeline/      # End-to-end orchestration
 ├── tests/         # node:test suite (no extra deps)
 ├── utils/         # Shared helpers (color, tree walking, case)
 ├── index.ts       # Library entry
 └── cli.ts         # CLI entry
 examples/
-├── sample-design.json   # Native format example (UserCard)
-└── figma-sample.json    # Figma REST API shape example
+├── sample-design.json         # Native format example (UserCard, desktop)
+├── sample-design-mobile.json  # Same UserCard at the sm breakpoint
+├── figma-sample.json          # Figma REST API shape example
+└── sketch-sample.json         # Pre-extracted Sketch page JSON
 doc/
 ├── opus4.6.md     # Original design doc (English / Chinese)
 └── qwen3.6.md     # Alternate design doc

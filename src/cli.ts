@@ -22,13 +22,19 @@ interface Args {
   platform: Platform;
   format: DesignFormat;
   emitIR?: string;
+  emitTokens?: string;
+  emitTailwind?: string;
+  emitDiff?: string;
+  componentLibrary?: 'antd' | 'mui';
+  responsive: { breakpoint: string; file: string }[];
+  prevIR?: string;
   useClaude?: boolean;
   verbose?: boolean;
   help?: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
-  const args: Args = { platform: 'react', format: 'auto' };
+  const args: Args = { platform: 'react', format: 'auto', responsive: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => argv[++i];
@@ -51,6 +57,29 @@ function parseArgs(argv: string[]): Args {
         break;
       case '--emit-ir':
         args.emitIR = next();
+        break;
+      case '--emit-tokens':
+        args.emitTokens = next();
+        break;
+      case '--emit-tailwind':
+        args.emitTailwind = next();
+        break;
+      case '--emit-diff':
+        args.emitDiff = next();
+        break;
+      case '--component-library':
+        args.componentLibrary = next() as 'antd' | 'mui';
+        break;
+      case '--responsive': {
+        // form: <breakpoint>=<file>
+        const arg = next();
+        const eq = arg.indexOf('=');
+        if (eq < 0) throw new Error(`--responsive expects <bp>=<file>, got ${arg}`);
+        args.responsive.push({ breakpoint: arg.slice(0, eq), file: arg.slice(eq + 1) });
+        break;
+      }
+      case '--prev-ir':
+        args.prevIR = next();
         break;
       case '--use-claude':
         args.useClaude = true;
@@ -76,20 +105,32 @@ Usage:
   d2c --input <file> [options]
 
 Options:
-  -i, --input <file>        Input design file (JSON)
-  -o, --out <dir|->         Output directory, or '-' for stdout (default: stdout)
-  -p, --platform <name>     Target platform: react | vue | html (default: react)
-  -f, --format <name>       Input format: figma | native | auto (default: auto)
-      --emit-ir <file>      Also write the intermediate IR JSON to <file>
-      --use-claude          Use Claude as the semantic LLM provider
-                            (requires ANTHROPIC_API_KEY env var)
-  -v, --verbose             Verbose logging
-  -h, --help                Show this help
+  -i, --input <file>             Input design file (JSON)
+  -o, --out <dir|->              Output directory, or '-' for stdout
+  -p, --platform <name>          Target platform: react | vue | html |
+                                 react-native | flutter (default: react)
+  -f, --format <name>            Input format: figma | sketch | native | auto
+      --emit-ir <file>           Also write the intermediate IR JSON
+      --emit-tokens <file>       Write design tokens (style-dictionary JSON)
+      --emit-tailwind <file>     Write a Tailwind preset (theme.extend) module
+      --emit-diff <file>         Write structural IR diff against --prev-ir
+      --component-library <lib>  Match nodes to a component library: antd | mui
+      --responsive <bp>=<file>   Add a responsive variant for breakpoint <bp>
+                                 (repeatable, e.g. --responsive sm=mobile.json)
+      --prev-ir <file>           Previous IR JSON for ai:ignore region merge
+      --use-claude               Use Claude as the semantic LLM provider
+                                 (requires ANTHROPIC_API_KEY env var)
+  -v, --verbose                  Verbose logging
+  -h, --help                     Show this help
 
 Examples:
   d2c -i design.json -p react -o out/react
-  d2c -i figma-export.json -f figma -p vue -o out/vue --verbose
-  d2c -i design.json -p html -o -          # print to stdout
+  d2c -i figma-export.json -f figma -p vue -o out/vue
+  d2c -i design.json -p flutter -o out/flutter
+  d2c -i design.json -p react-native -o out/rn
+  d2c -i design.json --component-library antd -p react -o out/antd
+  d2c -i design.json --emit-tokens out/tokens.json --emit-tailwind out/preset.js
+  d2c -i design.json --responsive sm=mobile.json --responsive lg=desktop.json -o out
 `;
 
 async function main(): Promise<void> {
@@ -119,16 +160,52 @@ async function main(): Promise<void> {
     llm = new ClaudeProvider({ apiKey });
   }
 
-  const { ir, generated } = await runPipeline(raw, {
+  // Pre-parse responsive variants (each one runs through Parse + Layout
+  // inference so the diff sees the same shape as the base IR).
+  const { parseDesign } = await import('./parser');
+  const { inferLayout } = await import('./layout/inference');
+  const responsiveVariants = args.responsive.map((r) => {
+    const variantRaw = JSON.parse(fs.readFileSync(r.file, 'utf8'));
+    const parsed = parseDesign(variantRaw, args.format);
+    return {
+      breakpoint: r.breakpoint,
+      doc: { ...parsed, root: inferLayout(parsed.root) },
+    };
+  });
+
+  let previousIR;
+  if (args.prevIR) {
+    previousIR = JSON.parse(fs.readFileSync(args.prevIR, 'utf8'));
+  }
+
+  const result = await runPipeline(raw, {
     format: args.format,
     platform: args.platform,
     verbose: args.verbose,
     llm,
+    componentLibrary: args.componentLibrary,
+    responsiveVariants,
+    previousIR,
+    computeDiff: !!args.emitDiff,
   });
+  const { ir, generated, tokens, styleDictionary, tailwindPreset, diff } = result;
+  void tokens; // tokens are exposed via styleDictionary
 
   if (args.emitIR) {
     writeFile(args.emitIR, JSON.stringify(ir, null, 2));
     if (args.verbose) console.error(`IR written to ${args.emitIR}`);
+  }
+  if (args.emitTokens) {
+    writeFile(args.emitTokens, JSON.stringify(styleDictionary, null, 2));
+    if (args.verbose) console.error(`tokens written to ${args.emitTokens}`);
+  }
+  if (args.emitTailwind) {
+    writeFile(args.emitTailwind, tailwindPreset);
+    if (args.verbose) console.error(`tailwind preset written to ${args.emitTailwind}`);
+  }
+  if (args.emitDiff && diff) {
+    writeFile(args.emitDiff, JSON.stringify(diff, null, 2));
+    if (args.verbose) console.error(`diff written to ${args.emitDiff}`);
   }
 
   const out = args.out ?? '-';

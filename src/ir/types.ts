@@ -116,6 +116,29 @@ export interface Semantics {
   };
   /** Accessible label */
   ariaLabel?: string;
+  /**
+   * Protected region marker — the IR diff + merge utility will preserve
+   * subtrees marked with `aiIgnore: true` across regenerations so user
+   * edits and hand-tuned layout don't get clobbered by the next build.
+   * Emitted in generated code as a "// ai:ignore" comment.
+   */
+  aiIgnore?: boolean;
+}
+
+/**
+ * Responsive variants for a node at different breakpoints. Keyed by
+ * breakpoint name (e.g. `sm`, `md`, `lg`). Only properties that differ
+ * from the base node need to be listed.
+ */
+export interface ResponsiveVariants {
+  [breakpoint: string]: Partial<{
+    box: Partial<Box>;
+    layout: Partial<Layout>;
+    style: Partial<Style>;
+    textStyle: Partial<TextStyle>;
+    /** hide this node at the breakpoint */
+    hidden: boolean;
+  }>;
 }
 
 export interface IRNode {
@@ -130,6 +153,8 @@ export interface IRNode {
   assetRef?: string;
   children: IRNode[];
   semantics?: Semantics;
+  /** Per-breakpoint overrides (set by responsive inference). */
+  responsive?: ResponsiveVariants;
 }
 
 export interface IRDocument {
