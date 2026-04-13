@@ -35,6 +35,10 @@ export type {
   SketchRenderOptions,
 } from './types';
 
+export { buildMakeRenderTree } from './makeRenderTree';
+export type { MakeRenderOptions, MakeRenderResult } from './makeRenderTree';
+export { renderMakeHtmlPreview } from './makeHtmlPreview';
+
 export { buildRenderTree, extractPages } from './sketchRenderTree';
 export { renderArtboardToSvg, renderDocumentToSvg } from './svgRenderer';
 export { renderToHtmlPreview } from './htmlPreview';
@@ -43,6 +47,10 @@ import type { RenderDocument, SketchRenderOptions } from './types';
 import { buildRenderTree, extractPages } from './sketchRenderTree';
 import { renderArtboardToSvg, renderDocumentToSvg } from './svgRenderer';
 import { renderToHtmlPreview } from './htmlPreview';
+import { buildMakeRenderTree } from './makeRenderTree';
+import type { MakeRenderOptions } from './makeRenderTree';
+import { renderMakeHtmlPreview } from './makeHtmlPreview';
+import type { MakeDocument } from '../parser/makeParser';
 
 export interface SketchRenderResult {
   /** The parsed render tree */
@@ -108,4 +116,35 @@ export function renderSketchArtboards(
       result: { renderDoc: singleDoc, svgs, html },
     };
   });
+}
+
+/* ── Figma Make Renderer ─────────────────────────────────────────────── */
+
+export interface MakeRenderFullResult {
+  /** The parsed render tree */
+  renderDoc: RenderDocument;
+  /** SVG strings keyed by artboard name */
+  svgs: Map<string, string>;
+  /** Standalone HTML preview (design + code side-by-side) */
+  html: string;
+  /** Extracted code files from the .make project */
+  codeFiles: { path: string; content: string; language: string }[];
+}
+
+/**
+ * One-shot render: MakeDocument → render tree → SVG + HTML preview (with code).
+ *
+ * Usage:
+ *   import { renderMake } from 'd2c/renderer';
+ *   const result = renderMake(makeDoc);
+ *   fs.writeFileSync('preview.html', result.html);
+ */
+export function renderMake(
+  makeDoc: MakeDocument,
+  options?: MakeRenderOptions,
+): MakeRenderFullResult {
+  const { renderDoc, codeFiles } = buildMakeRenderTree(makeDoc, options);
+  const svgs = renderDocumentToSvg(renderDoc.artboards, options);
+  const html = renderMakeHtmlPreview(renderDoc, codeFiles, options);
+  return { renderDoc, svgs, html, codeFiles };
 }

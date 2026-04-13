@@ -40,7 +40,7 @@ interface Args {
   llmBaseUrl?: string;
   verbose?: boolean;
   help?: boolean;
-  /** Render mode: render Sketch design to SVG / HTML preview */
+  /** Render mode: render Sketch/Make design to SVG / HTML preview */
   render?: boolean;
   renderFormat?: 'svg' | 'html';
   renderScale?: number;
@@ -150,7 +150,7 @@ Options:
   -o, --out <dir|->              Output directory, or '-' for stdout
   -p, --platform <name>          Target platform: react | vue | html |
                                  react-native | flutter (default: react)
-  -f, --format <name>            Input format: figma | sketch | native | auto
+  -f, --format <name>            Input format: figma | sketch | native | make | auto
       --emit-ir <file>           Also write the intermediate IR JSON
       --emit-tokens <file>       Write design tokens (style-dictionary JSON)
       --emit-tailwind <file>     Write a Tailwind preset (theme.extend) module
@@ -203,12 +203,15 @@ Examples:
   d2c -i sketch.json --render -o out/preview
   d2c -i sketch.json --render --render-format svg -o out/svg
   d2c -i sketch.json --render --render-scale 2 -o out/preview
+  d2c -i design.make --render -o out/make-preview
+  d2c -i make-decoded.json -f make -p react -o out/react
 `;
 
 /**
- * Resolve the --input path into a parsed JSON object.
+ * Resolve the --input path into a parsed JSON object or binary Buffer.
  * Supports:
  *  - A regular JSON file (any format)
+ *  - A .make binary file (returns Buffer — caller must handle async parsing)
  *  - An extracted .sketch directory (contains pages/*.json)
  *  - A document.json with MSJSONFileReference page pointers
  */
@@ -216,6 +219,10 @@ function resolveInput(inputPath: string, format: DesignFormat): unknown {
   const stat = fs.statSync(inputPath);
   if (stat.isDirectory()) {
     return resolveSketchDir(inputPath);
+  }
+  // .make binary files are read as Buffer for binary parsing
+  if (format === 'make' || (format === 'auto' && inputPath.endsWith('.make'))) {
+    return fs.readFileSync(inputPath); // returns Buffer
   }
   const raw = JSON.parse(fs.readFileSync(inputPath, 'utf8'));
   if (format === 'sketch' || format === 'auto') {
@@ -278,12 +285,63 @@ async function main(): Promise<void> {
 
   const raw = resolveInput(args.input, args.format);
 
-  // ─── Render mode: Sketch → SVG / HTML preview ─────────────────────
+  // ─── Render mode: Sketch / Make → SVG / HTML preview ────────────
   if (args.render) {
-    const { renderSketch, renderSketchArtboards } = await import('./renderer');
+    const renderer = await import('./renderer');
     const scale = args.renderScale ?? 1;
     const format = args.renderFormat ?? 'html';
     const out = args.out ?? '-';
+
+    // ── Figma Make binary render ──────────────────────────────────────
+    const isMakeBuf = Buffer.isBuffer(raw) || (raw instanceof Uint8Array);
+    const isMakeJson = !isMakeBuf && args.format === 'make';
+    if (isMakeBuf || isMakeJson) {
+      const { parseMakeBinary, parseMakeJson: parseMakeJsonFn } = await import('./parser/makeParser');
+      const makeDoc = isMakeBuf
+        ? await parseMakeBinary(raw as Buffer)
+        : parseMakeJsonFn(raw);
+      const result = renderer.renderMake(makeDoc, { scale });
+
+      if (format === 'html') {
+        if (out === '-') {
+          console.log(result.html);
+        } else {
+          fs.mkdirSync(out, { recursive: true });
+          const htmlPath = path.join(out, 'preview.html');
+          fs.writeFileSync(htmlPath, result.html);
+          if (args.verbose && result.codeFiles.length > 0) {
+            for (const f of result.codeFiles) {
+              const dest = path.join(out, 'code', f.path);
+              fs.mkdirSync(path.dirname(dest), { recursive: true });
+              fs.writeFileSync(dest, f.content);
+              if (args.verbose) console.error(`wrote ${dest}`);
+            }
+          }
+          console.error(`d2c render (make): wrote ${htmlPath}` +
+            (result.codeFiles.length > 0 ? ` + ${result.codeFiles.length} code file(s)` : ''));
+        }
+      } else {
+        if (out === '-') {
+          for (const [name, svg] of result.svgs) {
+            console.log(`<!-- ===== ${name} ===== -->`);
+            console.log(svg);
+          }
+        } else {
+          fs.mkdirSync(out, { recursive: true });
+          for (const [name, svg] of result.svgs) {
+            const safeName = name.replace(/[^a-zA-Z0-9_-]/g, '_');
+            const svgPath = path.join(out, `${safeName}.svg`);
+            fs.writeFileSync(svgPath, svg);
+            if (args.verbose) console.error(`wrote ${svgPath}`);
+          }
+          console.error(`d2c render (make): wrote ${result.svgs.size} SVG file(s) → ${out}`);
+        }
+      }
+      return;
+    }
+
+    // ── Sketch / JSON render ──────────────────────────────────────────
+    const { renderSketch, renderSketchArtboards } = renderer;
 
     // 多页面（实际按 artboard 拆分）：每个 artboard 输出独立文件
     if (args.allPages) {

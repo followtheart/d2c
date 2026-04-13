@@ -1,0 +1,336 @@
+{
+  "name": "Figma Make Sample — Dashboard",
+  "width": 1440,
+  "height": 900,
+  "nodes": [
+    {
+      "id": "frame-dashboard",
+      "type": "FRAME",
+      "name": "Dashboard",
+      "visible": true,
+      "x": 0,
+      "y": 0,
+      "width": 1440,
+      "height": 900,
+      "fills": [
+        { "type": "SOLID", "visible": true, "color": { "r": 0.96, "g": 0.96, "b": 0.98, "a": 1 } }
+      ],
+      "strokes": [],
+      "effects": [],
+      "layoutMode": "HORIZONTAL",
+      "paddingLeft": 0,
+      "paddingRight": 0,
+      "paddingTop": 0,
+      "paddingBottom": 0,
+      "itemSpacing": 0,
+      "children": [
+        {
+          "id": "sidebar",
+          "type": "FRAME",
+          "name": "Sidebar",
+          "visible": true,
+          "x": 0,
+          "y": 0,
+          "width": 240,
+          "height": 900,
+          "fills": [
+            { "type": "SOLID", "visible": true, "color": { "r": 0.09, "g": 0.09, "b": 0.12, "a": 1 } }
+          ],
+          "strokes": [],
+          "effects": [],
+          "layoutMode": "VERTICAL",
+          "paddingLeft": 16,
+          "paddingRight": 16,
+          "paddingTop": 24,
+          "paddingBottom": 24,
+          "itemSpacing": 8,
+          "children": [
+            {
+              "id": "logo",
+              "type": "TEXT",
+              "name": "Logo",
+              "visible": true,
+              "x": 16,
+              "y": 24,
+              "width": 208,
+              "height": 32,
+              "characters": "Figma Make",
+              "fontFamily": "Inter",
+              "fontSize": 20,
+              "fontWeight": 700,
+              "lineHeightPx": 28,
+              "fills": [{ "type": "SOLID", "visible": true, "color": { "r": 1, "g": 1, "b": 1, "a": 1 } }]
+            },
+            {
+              "id": "nav-item-home",
+              "type": "FRAME",
+              "name": "Nav — Home",
+              "visible": true,
+              "x": 16,
+              "y": 80,
+              "width": 208,
+              "height": 40,
+              "cornerRadius": 8,
+              "fills": [
+                { "type": "SOLID", "visible": true, "color": { "r": 0.24, "g": 0.47, "b": 1.0, "a": 0.15 } }
+              ],
+              "strokes": [],
+              "effects": [],
+              "layoutMode": "HORIZONTAL",
+              "paddingLeft": 12,
+              "paddingRight": 12,
+              "paddingTop": 8,
+              "paddingBottom": 8,
+              "itemSpacing": 8,
+              "children": [
+                {
+                  "id": "nav-home-label",
+                  "type": "TEXT",
+                  "name": "Home",
+                  "visible": true,
+                  "x": 24,
+                  "y": 88,
+                  "width": 60,
+                  "height": 24,
+                  "characters": "Home",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": 500,
+                  "fills": [{ "type": "SOLID", "visible": true, "color": { "r": 0.36, "g": 0.63, "b": 1.0, "a": 1 } }]
+                }
+              ]
+            },
+            {
+              "id": "nav-item-analytics",
+              "type": "FRAME",
+              "name": "Nav — Analytics",
+              "visible": true,
+              "x": 16,
+              "y": 128,
+              "width": 208,
+              "height": 40,
+              "cornerRadius": 8,
+              "fills": [],
+              "strokes": [],
+              "effects": [],
+              "layoutMode": "HORIZONTAL",
+              "paddingLeft": 12,
+              "paddingRight": 12,
+              "paddingTop": 8,
+              "paddingBottom": 8,
+              "itemSpacing": 8,
+              "children": [
+                {
+                  "id": "nav-analytics-label",
+                  "type": "TEXT",
+                  "name": "Analytics",
+                  "visible": true,
+                  "x": 24,
+                  "y": 136,
+                  "width": 80,
+                  "height": 24,
+                  "characters": "Analytics",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": 400,
+                  "fills": [{ "type": "SOLID", "visible": true, "color": { "r": 0.6, "g": 0.6, "b": 0.65, "a": 1 } }]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "main-content",
+          "type": "FRAME",
+          "name": "Main Content",
+          "visible": true,
+          "x": 240,
+          "y": 0,
+          "width": 1200,
+          "height": 900,
+          "fills": [],
+          "strokes": [],
+          "effects": [],
+          "layoutMode": "VERTICAL",
+          "paddingLeft": 32,
+          "paddingRight": 32,
+          "paddingTop": 32,
+          "paddingBottom": 32,
+          "itemSpacing": 24,
+          "children": [
+            {
+              "id": "page-title",
+              "type": "TEXT",
+              "name": "Page Title",
+              "visible": true,
+              "x": 272,
+              "y": 32,
+              "width": 300,
+              "height": 40,
+              "characters": "Dashboard",
+              "fontFamily": "Inter",
+              "fontSize": 28,
+              "fontWeight": 700,
+              "lineHeightPx": 36,
+              "fills": [{ "type": "SOLID", "visible": true, "color": { "r": 0.1, "g": 0.1, "b": 0.15, "a": 1 } }]
+            },
+            {
+              "id": "stats-row",
+              "type": "FRAME",
+              "name": "Stats Row",
+              "visible": true,
+              "x": 272,
+              "y": 104,
+              "width": 1136,
+              "height": 120,
+              "fills": [],
+              "strokes": [],
+              "effects": [],
+              "layoutMode": "HORIZONTAL",
+              "paddingLeft": 0,
+              "paddingRight": 0,
+              "paddingTop": 0,
+              "paddingBottom": 0,
+              "itemSpacing": 16,
+              "children": [
+                {
+                  "id": "stat-card-users",
+                  "type": "FRAME",
+                  "name": "Stat — Total Users",
+                  "visible": true,
+                  "x": 272,
+                  "y": 104,
+                  "width": 268,
+                  "height": 120,
+                  "cornerRadius": 12,
+                  "fills": [{ "type": "SOLID", "visible": true, "color": { "r": 1, "g": 1, "b": 1, "a": 1 } }],
+                  "effects": [
+                    { "type": "DROP_SHADOW", "visible": true, "radius": 12, "offset": { "x": 0, "y": 2 }, "color": { "r": 0, "g": 0, "b": 0, "a": 0.06 }, "spread": 0 }
+                  ],
+                  "layoutMode": "VERTICAL",
+                  "paddingLeft": 20,
+                  "paddingRight": 20,
+                  "paddingTop": 20,
+                  "paddingBottom": 20,
+                  "itemSpacing": 8,
+                  "children": [
+                    {
+                      "id": "stat-users-label",
+                      "type": "TEXT",
+                      "name": "Label",
+                      "visible": true,
+                      "x": 292,
+                      "y": 124,
+                      "width": 120,
+                      "height": 20,
+                      "characters": "Total Users",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": 400,
+                      "fills": [{ "type": "SOLID", "visible": true, "color": { "r": 0.5, "g": 0.5, "b": 0.55, "a": 1 } }]
+                    },
+                    {
+                      "id": "stat-users-value",
+                      "type": "TEXT",
+                      "name": "Value",
+                      "visible": true,
+                      "x": 292,
+                      "y": 152,
+                      "width": 120,
+                      "height": 36,
+                      "characters": "24,521",
+                      "fontFamily": "Inter",
+                      "fontSize": 28,
+                      "fontWeight": 700,
+                      "fills": [{ "type": "SOLID", "visible": true, "color": { "r": 0.1, "g": 0.1, "b": 0.15, "a": 1 } }]
+                    }
+                  ]
+                },
+                {
+                  "id": "stat-card-revenue",
+                  "type": "FRAME",
+                  "name": "Stat — Revenue",
+                  "visible": true,
+                  "x": 556,
+                  "y": 104,
+                  "width": 268,
+                  "height": 120,
+                  "cornerRadius": 12,
+                  "fills": [{ "type": "SOLID", "visible": true, "color": { "r": 1, "g": 1, "b": 1, "a": 1 } }],
+                  "effects": [
+                    { "type": "DROP_SHADOW", "visible": true, "radius": 12, "offset": { "x": 0, "y": 2 }, "color": { "r": 0, "g": 0, "b": 0, "a": 0.06 }, "spread": 0 }
+                  ],
+                  "layoutMode": "VERTICAL",
+                  "paddingLeft": 20,
+                  "paddingRight": 20,
+                  "paddingTop": 20,
+                  "paddingBottom": 20,
+                  "itemSpacing": 8,
+                  "children": [
+                    {
+                      "id": "stat-revenue-label",
+                      "type": "TEXT",
+                      "name": "Label",
+                      "visible": true,
+                      "x": 576,
+                      "y": 124,
+                      "width": 120,
+                      "height": 20,
+                      "characters": "Revenue",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": 400,
+                      "fills": [{ "type": "SOLID", "visible": true, "color": { "r": 0.5, "g": 0.5, "b": 0.55, "a": 1 } }]
+                    },
+                    {
+                      "id": "stat-revenue-value",
+                      "type": "TEXT",
+                      "name": "Value",
+                      "visible": true,
+                      "x": 576,
+                      "y": 152,
+                      "width": 140,
+                      "height": 36,
+                      "characters": "$1,284,000",
+                      "fontFamily": "Inter",
+                      "fontSize": 28,
+                      "fontWeight": 700,
+                      "fills": [{ "type": "SOLID", "visible": true, "color": { "r": 0.1, "g": 0.1, "b": 0.15, "a": 1 } }]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "codeFiles": [
+    {
+      "path": "src/App.tsx",
+      "language": "typescript",
+      "content": "import React from 'react';\nimport { Dashboard } from './components/Dashboard';\nimport './App.css';\n\nexport default function App() {\n  return (\n    <div className=\"app\">\n      <Dashboard />\n    </div>\n  );\n}"
+    },
+    {
+      "path": "src/components/Dashboard.tsx",
+      "language": "typescript",
+      "content": "import React from 'react';\nimport { Sidebar } from './Sidebar';\nimport { StatCard } from './StatCard';\nimport styles from './Dashboard.module.css';\n\nexport function Dashboard() {\n  return (\n    <div className={styles.layout}>\n      <Sidebar />\n      <main className={styles.main}>\n        <h1 className={styles.title}>Dashboard</h1>\n        <div className={styles.statsRow}>\n          <StatCard label=\"Total Users\" value=\"24,521\" />\n          <StatCard label=\"Revenue\" value=\"$1,284,000\" />\n        </div>\n      </main>\n    </div>\n  );\n}"
+    },
+    {
+      "path": "src/components/Sidebar.tsx",
+      "language": "typescript",
+      "content": "import React from 'react';\nimport styles from './Sidebar.module.css';\n\nexport function Sidebar() {\n  return (\n    <nav className={styles.sidebar}>\n      <div className={styles.logo}>Figma Make</div>\n      <ul className={styles.nav}>\n        <li className={styles.navItemActive}>Home</li>\n        <li className={styles.navItem}>Analytics</li>\n      </ul>\n    </nav>\n  );\n}"
+    },
+    {
+      "path": "src/components/StatCard.tsx",
+      "language": "typescript",
+      "content": "import React from 'react';\nimport styles from './StatCard.module.css';\n\ninterface StatCardProps {\n  label: string;\n  value: string;\n}\n\nexport function StatCard({ label, value }: StatCardProps) {\n  return (\n    <div className={styles.card}>\n      <span className={styles.label}>{label}</span>\n      <span className={styles.value}>{value}</span>\n    </div>\n  );\n}"
+    },
+    {
+      "path": "src/components/Dashboard.module.css",
+      "language": "css",
+      "content": ".layout {\n  display: flex;\n  width: 1440px;\n  height: 900px;\n  background: #f5f5f8;\n}\n\n.main {\n  flex: 1;\n  padding: 32px;\n  display: flex;\n  flex-direction: column;\n  gap: 24px;\n}\n\n.title {\n  font-size: 28px;\n  font-weight: 700;\n  color: #1a1a26;\n}\n\n.statsRow {\n  display: flex;\n  gap: 16px;\n}"
+    }
+  ]
+}
