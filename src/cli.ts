@@ -40,6 +40,10 @@ interface Args {
   llmBaseUrl?: string;
   verbose?: boolean;
   help?: boolean;
+  /** Render mode: render Sketch design to SVG / HTML preview */
+  render?: boolean;
+  renderFormat?: 'svg' | 'html';
+  renderScale?: number;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -105,6 +109,17 @@ function parseArgs(argv: string[]): Args {
       case '--llm-base-url':
         args.llmBaseUrl = next();
         break;
+      case '--render':
+        args.render = true;
+        break;
+      case '--render-format':
+        args.renderFormat = next() as 'svg' | 'html';
+        break;
+      case '--render-scale': {
+        const s = next();
+        args.renderScale = parseFloat(s);
+        break;
+      }
       case '--verbose':
       case '-v':
         args.verbose = true;
@@ -153,6 +168,13 @@ Options:
                                  (e.g. deepseek-chat, openai/gpt-4o-mini)
       --llm-base-url <url>       Override the provider base URL (e.g. for
                                  self-hosted gateways or Ollama)
+      --render                     Render the design visually (SVG / HTML)
+                                 instead of generating code. Implies
+                                 --format sketch (or auto-detected).
+      --render-format <fmt>       Render output format: svg | html
+                                 (default: html)
+      --render-scale <n>          Scale factor for rendered output
+                                 (default: 1)
   -v, --verbose                  Verbose logging
   -h, --help                     Show this help
 
@@ -170,6 +192,9 @@ Examples:
     --llm-model deepseek-chat -o out/react
   d2c -i ./extracted-sketch-dir/ -f sketch -p html -o out/html
   d2c -i design.json -p html --no-llm -o out/html
+  d2c -i sketch.json --render -o out/preview
+  d2c -i sketch.json --render --render-format svg -o out/svg
+  d2c -i sketch.json --render --render-scale 2 -o out/preview
 `;
 
 /**
@@ -244,6 +269,44 @@ async function main(): Promise<void> {
   }
 
   const raw = resolveInput(args.input, args.format);
+
+  // ─── Render mode: Sketch → SVG / HTML preview ─────────────────────
+  if (args.render) {
+    const { renderSketch } = await import('./renderer');
+    const scale = args.renderScale ?? 1;
+    const result = renderSketch(raw, { scale });
+    const format = args.renderFormat ?? 'html';
+    const out = args.out ?? '-';
+
+    if (format === 'html') {
+      if (out === '-') {
+        console.log(result.html);
+      } else {
+        fs.mkdirSync(out, { recursive: true });
+        const htmlPath = path.join(out, 'preview.html');
+        fs.writeFileSync(htmlPath, result.html);
+        console.error(`d2c render: wrote ${htmlPath}`);
+      }
+    } else {
+      // SVG — one file per artboard
+      if (out === '-') {
+        for (const [name, svg] of result.svgs) {
+          console.log(`<!-- ===== ${name} ===== -->`);
+          console.log(svg);
+        }
+      } else {
+        fs.mkdirSync(out, { recursive: true });
+        for (const [name, svg] of result.svgs) {
+          const safeName = name.replace(/[^a-zA-Z0-9_-]/g, '_');
+          const svgPath = path.join(out, `${safeName}.svg`);
+          fs.writeFileSync(svgPath, svg);
+          if (args.verbose) console.error(`wrote ${svgPath}`);
+        }
+        console.error(`d2c render: wrote ${result.svgs.size} SVG file(s) → ${out}`);
+      }
+    }
+    return;
+  }
 
   // Load config file (.d2crc.json) — values are used as fallbacks.
   const config = loadConfig();

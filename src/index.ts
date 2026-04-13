@@ -38,3 +38,17 @@ export { runPipeline } from './pipeline/d2cPipeline';
 export type { PipelineOptions, PipelineResult } from './pipeline/d2cPipeline';
 export { loadConfig, resolveApiKey } from './config';
 export type { D2CConfig } from './config';
+export {
+  renderSketch,
+  buildRenderTree,
+  renderArtboardToSvg,
+  renderDocumentToSvg,
+  renderToHtmlPreview,
+} from './renderer';
+export type {
+  SketchRenderResult,
+  RenderNode,
+  RenderDocument,
+  RenderArtboard,
+  SketchRenderOptions,
+} from './renderer';
