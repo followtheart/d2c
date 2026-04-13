@@ -2,8 +2,9 @@ import type { IRDocument, IRMultiPageDocument } from '../ir/types';
 import { parseFigma, parseFigmaMultiPage } from './figmaParser';
 import { parseNativeDesign, parseNativeDesignMultiPage } from './nativeParser';
 import { parseSketch, parseSketchMultiPage } from './sketchParser';
+import { parseMakeJson, parseMakeJsonMultiPage, isMakeJson } from './makeParser';
 
-export type DesignFormat = 'figma' | 'native' | 'sketch' | 'auto';
+export type DesignFormat = 'figma' | 'native' | 'sketch' | 'make' | 'auto';
 
 /**
  * Dispatch a raw design JSON to the right parser.
@@ -21,6 +22,8 @@ export function parseDesign(raw: unknown, format: DesignFormat = 'auto'): IRDocu
       return parseSketch(raw);
     case 'native':
       return parseNativeDesign(raw);
+    case 'make':
+      return parseMakeJson(raw);
     default:
       throw new Error(`Unsupported design format: ${fmt}`);
   }
@@ -29,6 +32,8 @@ export function parseDesign(raw: unknown, format: DesignFormat = 'auto'): IRDocu
 function detect(raw: unknown): DesignFormat {
   if (!raw || typeof raw !== 'object') return 'native';
   const r = raw as Record<string, unknown>;
+  // Figma Make decoded JSON — nodes[] with Figma node types + optional codeFiles[]
+  if (isMakeJson(raw)) return 'make';
   // Figma REST API shape
   if (r.document && typeof r.document === 'object' &&
       !(r.document as Record<string, unknown>)._class) {
@@ -63,6 +68,9 @@ export function parseDesignMultiPage(raw: unknown, format: DesignFormat = 'auto'
     case 'native':
       pages = parseNativeDesignMultiPage(raw);
       break;
+    case 'make':
+      pages = parseMakeJsonMultiPage(raw);
+      break;
     default:
       throw new Error(`Unsupported design format: ${fmt}`);
   }
@@ -71,3 +79,5 @@ export function parseDesignMultiPage(raw: unknown, format: DesignFormat = 'auto'
 }
 
 export { parseFigma, parseFigmaMultiPage, parseNativeDesign, parseNativeDesignMultiPage, parseSketch, parseSketchMultiPage };
+export { parseMakeJson, parseMakeJsonMultiPage, isMakeJson } from './makeParser';
+export type { MakeDocument, MakeNode, MakeCodeFile } from './makeParser';

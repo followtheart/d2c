@@ -1,7 +1,8 @@
 export * from './ir/types';
 export { validateIR, IRValidationError } from './ir/schema';
-export { parseDesign, parseDesignMultiPage, parseFigma, parseFigmaMultiPage, parseNativeDesign, parseNativeDesignMultiPage, parseSketch, parseSketchMultiPage } from './parser';
-export type { DesignFormat } from './parser';
+export { parseDesign, parseDesignMultiPage, parseFigma, parseFigmaMultiPage, parseNativeDesign, parseNativeDesignMultiPage, parseSketch, parseSketchMultiPage, parseMakeJson, parseMakeJsonMultiPage, isMakeJson } from './parser';
+export type { DesignFormat, MakeDocument, MakeNode, MakeCodeFile } from './parser';
+export { parseMakeBinary, parseMake, parseMakeMultiPage } from './parser/makeParser';
 export { inferLayout } from './layout/inference';
 export { inferResponsive } from './layout/responsive';
 export type { ResponsiveVariantInput } from './layout/responsive';
@@ -44,6 +45,9 @@ export {
   renderArtboardToSvg,
   renderDocumentToSvg,
   renderToHtmlPreview,
+  renderMake,
+  buildMakeRenderTree,
+  renderMakeHtmlPreview,
 } from './renderer';
 export type {
   SketchRenderResult,
@@ -51,4 +55,8 @@ export type {
   RenderDocument,
   RenderArtboard,
   SketchRenderOptions,
+  MakeRenderOptions,
+  MakeRenderResult,
+  MakeRenderFullResult,
 } from './renderer';
+export { isMakeBinary } from './parser/makeParser';
