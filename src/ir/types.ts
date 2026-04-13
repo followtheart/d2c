@@ -63,6 +63,7 @@ export interface Border {
 
 export interface Style {
   backgroundColor?: string;
+  backgroundImage?: string;
   borderRadius?: number | [number, number, number, number];
   border?: Border;
   shadows?: Shadow[];
@@ -164,6 +165,12 @@ export interface IRDocument {
   root: IRNode;
   /** Design tokens extracted during parsing */
   tokens?: DesignTokens;
+}
+
+// 多页面文档：包含多个 IRDocument（页面）
+export interface IRMultiPageDocument {
+  name: string;
+  pages: IRDocument[];
 }
 
 export interface DesignTokens {

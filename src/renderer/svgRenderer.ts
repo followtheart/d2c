@@ -478,7 +478,13 @@ export function renderArtboardToSvg(
   const w = px(artboard.frame.width, scale);
   const h = px(artboard.frame.height, scale);
 
-  const body = renderNode(artboard.root, ctx, 1);
+  // artboard 的 frame.x/y 是页面级坐标，但子元素使用相对于 artboard 的局部坐标，
+  // 所以渲染时需要将 root 的 frame 归零以保持坐标一致
+  const root: RenderNode = {
+    ...artboard.root,
+    frame: { ...artboard.root.frame, x: 0, y: 0 },
+  };
+  const body = renderNode(root, ctx, 1);
 
   const defs = ctx.defs.length
     ? `  <defs>\n    ${ctx.defs.join('\n    ')}\n  </defs>\n`

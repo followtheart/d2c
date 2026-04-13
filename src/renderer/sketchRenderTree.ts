@@ -475,7 +475,7 @@ function convertLayer(
 
 /* ── Top-level: extract artboards / pages ─────────────────────────────── */
 
-function extractPages(raw: unknown): SketchPage[] {
+export function extractPages(raw: unknown): SketchPage[] {
   const obj = raw as Record<string, unknown>;
 
   // Shape (a): { document: { pages: ... } }

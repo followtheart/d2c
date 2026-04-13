@@ -1,6 +1,6 @@
 export * from './ir/types';
 export { validateIR, IRValidationError } from './ir/schema';
-export { parseDesign, parseFigma, parseNativeDesign, parseSketch } from './parser';
+export { parseDesign, parseDesignMultiPage, parseFigma, parseFigmaMultiPage, parseNativeDesign, parseNativeDesignMultiPage, parseSketch, parseSketchMultiPage } from './parser';
 export type { DesignFormat } from './parser';
 export { inferLayout } from './layout/inference';
 export { inferResponsive } from './layout/responsive';
@@ -34,8 +34,8 @@ export {
 export type { TailwindTokenLookup } from './tokens/tailwindPreset';
 export { diffIR, mergeProtectedRegions, formatDiff } from './diff/merge';
 export type { IRDiffEntry } from './diff/merge';
-export { runPipeline } from './pipeline/d2cPipeline';
-export type { PipelineOptions, PipelineResult } from './pipeline/d2cPipeline';
+export { runPipeline, runMultiPagePipeline } from './pipeline/d2cPipeline';
+export type { PipelineOptions, PipelineResult, MultiPagePipelineResult } from './pipeline/d2cPipeline';
 export { loadConfig, resolveApiKey } from './config';
 export type { D2CConfig } from './config';
 export {

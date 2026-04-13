@@ -174,3 +174,22 @@ export function parseNativeDesign(raw: unknown): IRDocument {
   validateIR(doc);
   return doc;
 }
+
+interface NativeMultiPageDoc {
+  name?: string;
+  pages: NativeInputDoc[];
+}
+
+// 支持 { pages: [...] } 格式的多页面 native 文档
+export function parseNativeDesignMultiPage(raw: unknown): IRDocument[] {
+  if (!raw || typeof raw !== 'object')
+    throw new Error('Native design input must be an object');
+  const obj = raw as Record<string, unknown>;
+  if (Array.isArray(obj.pages) && obj.pages.length > 0 &&
+      typeof (obj.pages[0] as Record<string, unknown>).width === 'number') {
+    return (obj as unknown as NativeMultiPageDoc).pages.map((p) =>
+      parseNativeDesign(p),
+    );
+  }
+  return [parseNativeDesign(raw)];
+}

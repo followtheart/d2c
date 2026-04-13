@@ -1,7 +1,7 @@
-import type { IRDocument } from '../ir/types';
-import { parseFigma } from './figmaParser';
-import { parseNativeDesign } from './nativeParser';
-import { parseSketch } from './sketchParser';
+import type { IRDocument, IRMultiPageDocument } from '../ir/types';
+import { parseFigma, parseFigmaMultiPage } from './figmaParser';
+import { parseNativeDesign, parseNativeDesignMultiPage } from './nativeParser';
+import { parseSketch, parseSketchMultiPage } from './sketchParser';
 
 export type DesignFormat = 'figma' | 'native' | 'sketch' | 'auto';
 
@@ -49,4 +49,25 @@ function detect(raw: unknown): DesignFormat {
   return 'native';
 }
 
-export { parseFigma, parseNativeDesign, parseSketch };
+// 解析为多页面文档：提取所有页面
+export function parseDesignMultiPage(raw: unknown, format: DesignFormat = 'auto'): IRMultiPageDocument {
+  const fmt = format === 'auto' ? detect(raw) : format;
+  let pages: IRDocument[];
+  switch (fmt) {
+    case 'figma':
+      pages = parseFigmaMultiPage(raw);
+      break;
+    case 'sketch':
+      pages = parseSketchMultiPage(raw);
+      break;
+    case 'native':
+      pages = parseNativeDesignMultiPage(raw);
+      break;
+    default:
+      throw new Error(`Unsupported design format: ${fmt}`);
+  }
+  const docName = pages[0]?.name ?? 'Untitled';
+  return { name: docName, pages };
+}
+
+export { parseFigma, parseFigmaMultiPage, parseNativeDesign, parseNativeDesignMultiPage, parseSketch, parseSketchMultiPage };

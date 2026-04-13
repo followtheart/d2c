@@ -248,12 +248,25 @@ function toIRNode(figma: FigmaNode, parent?: FigmaNode): IRNode {
   return node;
 }
 
+// 将一个 Canvas（页面）下的内容转为 IRDocument
+function canvasToIRDocument(canvas: FigmaNode, docName?: string): IRDocument {
+  const frame = canvas.children?.[0] ?? canvas;
+  const bb = frame.absoluteBoundingBox ?? { x: 0, y: 0, width: 1440, height: 900 };
+  const ir: IRDocument = {
+    name: canvas.name ?? docName ?? 'Figma Design',
+    width: bb.width,
+    height: bb.height,
+    root: toIRNode(frame),
+  };
+  validateIR(ir);
+  return ir;
+}
+
 export function parseFigma(raw: unknown): IRDocument {
   if (!raw || typeof raw !== 'object')
     throw new Error('Figma input must be an object');
   const r = raw as FigmaFileResponse;
   if (!r.document) throw new Error('Figma response missing `document`');
-  // Use the first FRAME under the document as root (common pattern).
   const doc = r.document;
   const firstCanvas = doc.children?.[0];
   const firstFrame = firstCanvas?.children?.[0] ?? firstCanvas ?? doc;
@@ -266,4 +279,15 @@ export function parseFigma(raw: unknown): IRDocument {
   };
   validateIR(ir);
   return ir;
+}
+
+// 提取所有页面（Canvas），每个 Canvas 对应一个 IRDocument
+export function parseFigmaMultiPage(raw: unknown): IRDocument[] {
+  if (!raw || typeof raw !== 'object')
+    throw new Error('Figma input must be an object');
+  const r = raw as FigmaFileResponse;
+  if (!r.document) throw new Error('Figma response missing `document`');
+  const canvases = r.document.children ?? [];
+  if (canvases.length === 0) return [parseFigma(raw)];
+  return canvases.map((canvas) => canvasToIRDocument(canvas, r.name));
 }

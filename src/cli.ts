@@ -10,7 +10,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import { runPipeline } from './pipeline/d2cPipeline';
+import { runPipeline, runMultiPagePipeline } from './pipeline/d2cPipeline';
 import type { Platform } from './codegen/factory';
 import type { DesignFormat } from './parser';
 import { ClaudeProvider } from './ai/claudeProvider';
@@ -44,6 +44,8 @@ interface Args {
   render?: boolean;
   renderFormat?: 'svg' | 'html';
   renderScale?: number;
+  // 多页面模式
+  allPages?: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -109,6 +111,9 @@ function parseArgs(argv: string[]): Args {
       case '--llm-base-url':
         args.llmBaseUrl = next();
         break;
+      case '--all-pages':
+        args.allPages = true;
+        break;
       case '--render':
         args.render = true;
         break;
@@ -168,6 +173,9 @@ Options:
                                  (e.g. deepseek-chat, openai/gpt-4o-mini)
       --llm-base-url <url>       Override the provider base URL (e.g. for
                                  self-hosted gateways or Ollama)
+      --all-pages                  Process all pages in the design (instead
+                                 of only the first page). Generates one
+                                 output per page plus a unified entry file.
       --render                     Render the design visually (SVG / HTML)
                                  instead of generating code. Implies
                                  --format sketch (or auto-detected).
@@ -272,11 +280,57 @@ async function main(): Promise<void> {
 
   // ─── Render mode: Sketch → SVG / HTML preview ─────────────────────
   if (args.render) {
-    const { renderSketch } = await import('./renderer');
+    const { renderSketch, renderSketchArtboards } = await import('./renderer');
     const scale = args.renderScale ?? 1;
-    const result = renderSketch(raw, { scale });
     const format = args.renderFormat ?? 'html';
     const out = args.out ?? '-';
+
+    // 多页面（实际按 artboard 拆分）：每个 artboard 输出独立文件
+    if (args.allPages) {
+      const abResults = renderSketchArtboards(raw, { scale });
+      if (format === 'html') {
+        if (out === '-') {
+          for (const { artboardName, result } of abResults) {
+            console.log(`<!-- ===== ${artboardName} ===== -->`);
+            console.log(result.html);
+          }
+        } else {
+          fs.mkdirSync(out, { recursive: true });
+          for (const { artboardName, result } of abResults) {
+            const safeName = artboardName.replace(/[^a-zA-Z0-9_-]/g, '_');
+            const htmlPath = path.join(out, `${safeName}.html`);
+            fs.writeFileSync(htmlPath, result.html);
+            if (args.verbose) console.error(`wrote ${htmlPath}`);
+          }
+          console.error(`d2c render: wrote ${abResults.length} HTML file(s) → ${out}`);
+        }
+      } else {
+        // SVG — one file per artboard
+        if (out === '-') {
+          for (const { artboardName, result } of abResults) {
+            for (const [, svg] of result.svgs) {
+              console.log(`<!-- ===== ${artboardName} ===== -->`);
+              console.log(svg);
+            }
+          }
+        } else {
+          fs.mkdirSync(out, { recursive: true });
+          for (const { artboardName, result } of abResults) {
+            const safeName = artboardName.replace(/[^a-zA-Z0-9_-]/g, '_');
+            for (const [, svg] of result.svgs) {
+              const svgPath = path.join(out, `${safeName}.svg`);
+              fs.writeFileSync(svgPath, svg);
+              if (args.verbose) console.error(`wrote ${svgPath}`);
+            }
+          }
+          console.error(`d2c render: wrote ${abResults.length} SVG file(s) → ${out}`);
+        }
+      }
+      return;
+    }
+
+    // 单页面渲染（默认）
+    const result = renderSketch(raw, { scale });
 
     if (format === 'html') {
       if (out === '-') {
@@ -365,7 +419,7 @@ async function main(): Promise<void> {
     previousIR = JSON.parse(fs.readFileSync(args.prevIR, 'utf8'));
   }
 
-  const result = await runPipeline(raw, {
+  const pipelineOpts = {
     format: args.format,
     platform: args.platform,
     verbose: args.verbose,
@@ -374,7 +428,34 @@ async function main(): Promise<void> {
     responsiveVariants,
     previousIR,
     computeDiff: !!args.emitDiff,
-  });
+  };
+
+  // 多页面模式
+  if (args.allPages) {
+    const multiResult = await runMultiPagePipeline(raw, pipelineOpts);
+    const { generated } = multiResult;
+    const out = args.out ?? '-';
+    if (out === '-') {
+      for (const file of generated.files) {
+        console.log(`// ===== ${file.path} =====`);
+        console.log(file.content);
+      }
+    } else {
+      fs.mkdirSync(out, { recursive: true });
+      for (const file of generated.files) {
+        const full = path.join(out, file.path);
+        fs.mkdirSync(path.dirname(full), { recursive: true });
+        fs.writeFileSync(full, file.content);
+        if (args.verbose) console.error(`wrote ${full}`);
+      }
+      console.error(
+        `d2c: generated ${generated.files.length} file(s) for ${multiResult.pages.length} page(s) \u2192 ${out} (entry: ${generated.entryFile})`,
+      );
+    }
+    return;
+  }
+
+  const result = await runPipeline(raw, pipelineOpts);
   const { ir, generated, tokens, styleDictionary, tailwindPreset, diff } = result;
   void tokens; // tokens are exposed via styleDictionary
 

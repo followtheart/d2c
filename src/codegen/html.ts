@@ -1,5 +1,5 @@
 import type { IRDocument, IRNode, SemanticRole } from '../ir/types';
-import { CodeGenerator, GenerateResult } from './base';
+import { CodeGenerator, GenerateResult, GeneratedFile } from './base';
 import { buildCssProps, cssPropsToBlock } from './cssBuilder';
 import { kebabCase } from '../utils/tree';
 
@@ -84,6 +84,54 @@ ${this.classCss.join('\n\n')}
         { path: 'styles.css', content: css },
       ],
     };
+  }
+
+  // 多页面：每页一个独立 HTML + 共享导航
+  generateMultiPage(docs: IRDocument[]): GenerateResult {
+    if (docs.length === 1) return this.generate(docs[0]);
+    const allFiles: GeneratedFile[] = [];
+    const pageNames = docs.map((d, i) => ({
+      name: d.name || `Page ${i + 1}`,
+      file: `${this.safePageDir(d.name || `page_${i + 1}`)}.html`,
+    }));
+
+    for (let i = 0; i < docs.length; i++) {
+      // 每页独立生成 CSS
+      this.classIndex.clear();
+      this.classCss = [];
+      this.classCounter = 0;
+      const body = this.renderNode(docs[i].root, 4);
+      const navItems = pageNames
+        .map((p, j) =>
+          j === i
+            ? `      <span style="font-weight:bold">${this.escapeText(p.name)}</span>`
+            : `      <a href="${p.file}">${this.escapeText(p.name)}</a>`,
+        )
+        .join('\n');
+      const html = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${this.escapeText(pageNames[i].name)}</title>
+    <style>
+.d2c-page-nav { display:flex; gap:16px; padding:12px 16px; background:#f5f5f5; border-bottom:1px solid #ddd; font-family:sans-serif; }
+.d2c-page-nav a { text-decoration:none; color:#0066cc; }
+${this.classCss.join('\n')}
+    </style>
+  </head>
+  <body>
+    <nav class="d2c-page-nav">
+${navItems}
+    </nav>
+${body}
+  </body>
+</html>
+`;
+      allFiles.push({ path: pageNames[i].file, content: html });
+    }
+
+    return { files: allFiles, entryFile: pageNames[0].file };
   }
 
   private classFor(node: IRNode, parentLayout?: 'flex' | 'grid' | 'absolute'): string {

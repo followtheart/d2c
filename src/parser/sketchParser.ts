@@ -48,8 +48,14 @@ interface SketchColor {
 interface SketchFillStyle {
   _class: 'fill';
   isEnabled?: boolean;
-  fillType?: number; // 0 = color, 4 = pattern (image)
+  fillType?: number; // 0 = color, 1 = gradient, 4 = pattern (image)
   color?: SketchColor;
+  gradient?: {
+    gradientType?: number;
+    from?: string;
+    to?: string;
+    stops?: { position?: number; color?: SketchColor }[];
+  };
 }
 
 interface SketchBorderStyle {
@@ -121,6 +127,22 @@ function extractStyle(layer: SketchLayer): Style {
   if (fill?.fillType === 0 || fill?.fillType === undefined) {
     const c = sketchColor(fill?.color);
     if (c) style.backgroundColor = c;
+  } else if (fill?.fillType === 1 && fill.gradient) {
+    const g = fill.gradient;
+    const stops = (g.stops ?? []).map((s: any) => {
+      const c = sketchColor(s.color) ?? '#000000';
+      return `${c} ${Math.round((s.position ?? 0) * 100)}%`;
+    });
+    if (stops.length >= 2) {
+      const parsePoint = (s: string) => {
+        const m = s.match(/\{([\d.]+),\s*([\d.]+)\}/);
+        return m ? [parseFloat(m[1]), parseFloat(m[2])] : [0, 0];
+      };
+      const [x0, y0] = parsePoint(g.from ?? '{0,0}');
+      const [x1, y1] = parsePoint(g.to ?? '{1,1}');
+      const angle = Math.round(Math.atan2(x1 - x0, y0 - y1) * (180 / Math.PI));
+      style.backgroundImage = `linear-gradient(${angle}deg, ${stops.join(', ')})`;
+    }
   }
   const border = (layer.style?.borders ?? []).find(
     (b) => b.isEnabled !== false,
@@ -246,24 +268,15 @@ function pickRootLayer(raw: SketchDocument | SketchPage | SketchLayer): SketchLa
   throw new Error('Sketch input: could not find a page/artboard root');
 }
 
-export function parseSketch(raw: unknown): IRDocument {
-  if (!raw || typeof raw !== 'object')
-    throw new Error('Sketch input must be an object');
-  const root = pickRootLayer(raw as SketchDocument);
-  const rootIR = toIRNode(root);
-  const width =
-    typeof rootIR.box.width === 'number' ? rootIR.box.width : 0;
-  const height =
-    typeof rootIR.box.height === 'number' ? rootIR.box.height : 0;
-  // Normalize root position to 0,0 so downstream layout inference doesn't
-  // get confused by artboard origins.
+// 将单个 layer 转换为 IRDocument
+function layerToIRDocument(layer: SketchLayer): IRDocument {
+  const rootIR = toIRNode(layer);
+  const width = typeof rootIR.box.width === 'number' ? rootIR.box.width : 0;
+  const height = typeof rootIR.box.height === 'number' ? rootIR.box.height : 0;
   rootIR.box.x = 0;
   rootIR.box.y = 0;
-  // Sketch child frames are relative to their parent. Our layout inference
-  // expects absolute coordinates within the root, so flatten them.
-  flattenCoordinates(rootIR, 0, 0);
   const doc: IRDocument = {
-    name: root.name ?? 'SketchDesign',
+    name: layer.name ?? 'SketchDesign',
     width,
     height,
     root: rootIR,
@@ -272,10 +285,31 @@ export function parseSketch(raw: unknown): IRDocument {
   return doc;
 }
 
-function flattenCoordinates(node: IRNode, ox: number, oy: number): void {
-  node.box.x = ox + node.box.x;
-  node.box.y = oy + node.box.y;
-  for (const c of node.children) {
-    flattenCoordinates(c, node.box.x, node.box.y);
-  }
+export function parseSketch(raw: unknown): IRDocument {
+  if (!raw || typeof raw !== 'object')
+    throw new Error('Sketch input must be an object');
+  const root = pickRootLayer(raw as SketchDocument);
+  return layerToIRDocument(root);
 }
+
+// 提取所有页面和画板，每个画板对应一个 IRDocument
+export function parseSketchMultiPage(raw: unknown): IRDocument[] {
+  if (!raw || typeof raw !== 'object')
+    throw new Error('Sketch input must be an object');
+  const doc = (raw as SketchDocument).document ?? (raw as SketchDocument);
+  const pages = (doc as SketchDocument).pages;
+  if (!pages) return [parseSketch(raw)];
+  const arr = Array.isArray(pages) ? pages : Object.values(pages);
+  const results: IRDocument[] = [];
+  for (const page of arr) {
+    const artboards = (page.layers ?? []).filter((l) => l._class === 'artboard');
+    if (artboards.length > 0) {
+      for (const ab of artboards) results.push(layerToIRDocument(ab));
+    } else {
+      results.push(layerToIRDocument(page));
+    }
+  }
+  return results.length > 0 ? results : [parseSketch(raw)];
+}
+
+

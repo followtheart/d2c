@@ -6,8 +6,8 @@
  *     ↓
  *   [Design tokens + optional Tailwind preset]
  */
-import type { IRDocument } from '../ir/types';
-import { parseDesign, DesignFormat } from '../parser';
+import type { IRDocument, IRMultiPageDocument } from '../ir/types';
+import { parseDesign, parseDesignMultiPage, DesignFormat } from '../parser';
 import { inferLayout } from '../layout/inference';
 import { enhance, LLMProvider } from '../ai/semanticEnhancer';
 import { createGenerator, Platform } from '../codegen/factory';
@@ -103,4 +103,49 @@ export async function runPipeline(
     tailwindPreset,
     diff,
   };
+}
+
+// 多页面 pipeline 结果
+export interface MultiPagePipelineResult {
+  pages: PipelineResult[];
+  // 所有页面合并后的代码输出
+  generated: GenerateResult;
+}
+
+// 多页面 pipeline：对每个页面分别运行 pipeline，最后合并生成代码
+export async function runMultiPagePipeline(
+  rawInput: unknown,
+  opts: PipelineOptions,
+): Promise<MultiPagePipelineResult> {
+  log(opts.verbose, '[multi] Parsing all pages...');
+  const multiDoc = parseDesignMultiPage(rawInput, opts.format ?? 'auto');
+
+  // 单页面退化为原流程
+  if (multiDoc.pages.length <= 1) {
+    const single = await runPipeline(rawInput, opts);
+    return { pages: [single], generated: single.generated };
+  }
+
+  const pageResults: PipelineResult[] = [];
+  for (let i = 0; i < multiDoc.pages.length; i++) {
+    const page = multiDoc.pages[i];
+    log(opts.verbose, `[multi] Processing page ${i + 1}/${multiDoc.pages.length}: ${page.name}`);
+    // 将单页面 IRDocument 包装为 raw input 再投入 pipeline
+    const pageRaw = {
+      name: page.name,
+      width: page.width,
+      height: page.height,
+      root: page.root,
+    };
+    const result = await runPipeline(pageRaw, { ...opts, format: 'native' });
+    pageResults.push(result);
+  }
+
+  log(opts.verbose, '[multi] Merging multi-page output...');
+  const generator = createGenerator(opts.platform);
+  const irs = pageResults.map((r) => r.ir);
+  const generated = generator.generateMultiPage(irs);
+
+  log(opts.verbose, 'Done (multi-page).');
+  return { pages: pageResults, generated };
 }

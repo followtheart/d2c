@@ -35,12 +35,12 @@ export type {
   SketchRenderOptions,
 } from './types';
 
-export { buildRenderTree } from './sketchRenderTree';
+export { buildRenderTree, extractPages } from './sketchRenderTree';
 export { renderArtboardToSvg, renderDocumentToSvg } from './svgRenderer';
 export { renderToHtmlPreview } from './htmlPreview';
 
 import type { RenderDocument, SketchRenderOptions } from './types';
-import { buildRenderTree } from './sketchRenderTree';
+import { buildRenderTree, extractPages } from './sketchRenderTree';
 import { renderArtboardToSvg, renderDocumentToSvg } from './svgRenderer';
 import { renderToHtmlPreview } from './htmlPreview';
 
@@ -51,6 +51,16 @@ export interface SketchRenderResult {
   svgs: Map<string, string>;
   /** Standalone HTML preview */
   html: string;
+}
+
+export interface SketchPageRenderResult {
+  pageName: string;
+  result: SketchRenderResult;
+}
+
+export interface SketchArtboardRenderResult {
+  artboardName: string;
+  result: SketchRenderResult;
 }
 
 /**
@@ -64,4 +74,38 @@ export function renderSketch(
   const svgs = renderDocumentToSvg(renderDoc.artboards, options);
   const html = renderToHtmlPreview(renderDoc, options);
   return { renderDoc, svgs, html };
+}
+
+/**
+ * Per-page render: split multi-page Sketch JSON and render each page separately.
+ */
+export function renderSketchPages(
+  sketchJson: unknown,
+  options?: SketchRenderOptions,
+): SketchPageRenderResult[] {
+  const pages = extractPages(sketchJson);
+  return pages.map((page) => {
+    const pageInput = { _class: 'page', name: page.name, layers: page.layers };
+    const result = renderSketch(pageInput, options);
+    return { pageName: page.name ?? 'Page', result };
+  });
+}
+
+/**
+ * Per-artboard render: every artboard gets its own standalone HTML preview.
+ */
+export function renderSketchArtboards(
+  sketchJson: unknown,
+  options?: SketchRenderOptions,
+): SketchArtboardRenderResult[] {
+  const fullDoc = buildRenderTree(sketchJson, options);
+  return fullDoc.artboards.map((ab) => {
+    const singleDoc: RenderDocument = { name: ab.name, artboards: [ab] };
+    const svgs = renderDocumentToSvg([ab], options);
+    const html = renderToHtmlPreview(singleDoc, options);
+    return {
+      artboardName: ab.name,
+      result: { renderDoc: singleDoc, svgs, html },
+    };
+  });
 }

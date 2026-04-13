@@ -68,6 +68,7 @@ export function buildCssProps(node: IRNode, parentLayout?: 'flex' | 'grid' | 'ab
 
   // Style
   if (style.backgroundColor) css['background-color'] = style.backgroundColor;
+  if (style.backgroundImage) css['background-image'] = style.backgroundImage;
   if (style.borderRadius !== undefined) {
     if (Array.isArray(style.borderRadius)) {
       const [tl, tr, br, bl] = style.borderRadius;
