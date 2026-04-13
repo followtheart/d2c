@@ -150,6 +150,12 @@ ${body}
     const tag = tagFor(node);
     const className = this.classFor(node, parentLayout);
 
+    // input 元素: 自闭合, 使用 placeholder 属性
+    if (node.type === 'input') {
+      const placeholder = this.escapeText(node.semantics?.ariaLabel ?? '');
+      return `${pad}<input class="${className}" placeholder="${placeholder}" />`;
+    }
+
     if (node.type === 'image') {
       const src = node.assetRef ?? '';
       const alt = this.escapeText(node.semantics?.ariaLabel ?? node.name);
@@ -158,6 +164,13 @@ ${body}
 
     if (node.type === 'text' || node.textStyle) {
       const content = this.escapeText(node.textStyle?.content ?? '');
+      return `${pad}<${tag} class="${className}">${content}</${tag}>`;
+    }
+
+    // 按钮等交互元素: 如果只有一个文本子节点, 将文本内联
+    if ((tag === 'button' || tag === 'a') && node.children.length === 1 &&
+        (node.children[0].type === 'text' || node.children[0].textStyle)) {
+      const content = this.escapeText(node.children[0].textStyle?.content ?? '');
       return `${pad}<${tag} class="${className}">${content}</${tag}>`;
     }
 

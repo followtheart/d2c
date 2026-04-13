@@ -45,17 +45,96 @@ function pickRoleByName(name: string): SemanticRole | undefined {
   return undefined;
 }
 
+// 检查文本节点是否在容器范围内
+function boxContains(outer: { x: number; y: number; width: number | 'auto' | 'fill'; height: number | 'auto' | 'fill' },
+  inner: { x: number; y: number; width: number | 'auto' | 'fill'; height: number | 'auto' | 'fill' }): boolean {
+  const ow = typeof outer.width === 'number' ? outer.width : 0;
+  const oh = typeof outer.height === 'number' ? outer.height : 0;
+  const iw = typeof inner.width === 'number' ? inner.width : 0;
+  const ih = typeof inner.height === 'number' ? inner.height : 0;
+  const tol = 2;
+  return inner.x >= outer.x - tol && inner.y >= outer.y - tol &&
+    inner.x + iw <= outer.x + ow + tol && inner.y + ih <= outer.y + oh + tol;
+}
+
+function boxArea(box: { width: number | 'auto' | 'fill'; height: number | 'auto' | 'fill' }): number {
+  const w = typeof box.width === 'number' ? box.width : 0;
+  const h = typeof box.height === 'number' ? box.height : 0;
+  return w * h;
+}
+
+// 将空间上包含在兄弟容器内的文本节点重新归入容器中
+function mergeOverlappingSiblings(node: IRNode): IRNode {
+  if (node.children.length < 2) return node;
+  const textIndices: number[] = [];
+  const containerIndices: number[] = [];
+  for (let i = 0; i < node.children.length; i++) {
+    const c = node.children[i];
+    if (c.type === 'text' || c.textStyle) textIndices.push(i);
+    else containerIndices.push(i);
+  }
+  if (!textIndices.length || !containerIndices.length) return node;
+
+  // 为每个文本节点找到最小的包含它的容器兄弟
+  const mergeMap = new Map<number, number[]>();
+  const mergedTextIndices = new Set<number>();
+  for (const ti of textIndices) {
+    const text = node.children[ti];
+    let bestIdx = -1;
+    let bestArea = Infinity;
+    for (const ci of containerIndices) {
+      const container = node.children[ci];
+      if (boxContains(container.box, text.box)) {
+        const area = boxArea(container.box);
+        if (area < bestArea) {
+          bestArea = area;
+          bestIdx = ci;
+        }
+      }
+    }
+    if (bestIdx >= 0) {
+      if (!mergeMap.has(bestIdx)) mergeMap.set(bestIdx, []);
+      mergeMap.get(bestIdx)!.push(ti);
+      mergedTextIndices.add(ti);
+    }
+  }
+  if (!mergedTextIndices.size) return node;
+
+  // 重建子节点列表
+  const newChildren: IRNode[] = [];
+  for (let i = 0; i < node.children.length; i++) {
+    if (mergedTextIndices.has(i)) continue;
+    let child = node.children[i];
+    const texts = mergeMap.get(i);
+    if (texts) {
+      // 将文本重新归入该容器, 并调整坐标为相对坐标
+      const adjusted = texts.map((ti) => {
+        const t = node.children[ti];
+        return { ...t, box: { ...t.box, x: t.box.x - child.box.x, y: t.box.y - child.box.y } };
+      });
+      child = { ...child, children: [...child.children, ...adjusted] };
+    }
+    newChildren.push(child);
+  }
+  return { ...node, children: newChildren };
+}
+
+// 检测名称中包含 input / field 的容器
+function isInputLike(node: IRNode): boolean {
+  if (node.type !== 'container') return false;
+  return /input|textfield|text.?field/i.test(node.name);
+}
+
 function isButtonLike(node: IRNode): boolean {
   if (node.type === 'button') return true;
   if (node.type !== 'container') return false;
-  // small rounded pill with at most text + icon inside
   const { style } = node;
   const radius =
     typeof style.borderRadius === 'number' ? style.borderRadius : undefined;
   const h = typeof node.box.height === 'number' ? node.box.height : Infinity;
   if (radius !== undefined && radius >= 4 && h <= 56 && node.children.length <= 3) {
     const hasText = node.children.some((c) => c.type === 'text');
-    if (hasText && style.backgroundColor) return true;
+    if (hasText && (style.backgroundColor || style.backgroundImage)) return true;
   }
   return false;
 }
@@ -101,6 +180,21 @@ function detectLists(node: IRNode): IRNode {
   return node;
 }
 
+// 将名称含 input/field 的容器转换为 input 节点
+function convertInputNodes(node: IRNode): IRNode {
+  if (isInputLike(node)) {
+    const textChild = node.children.find((c) => c.type === 'text');
+    const placeholder = textChild?.textStyle?.content;
+    return {
+      ...node,
+      type: 'input',
+      children: [],
+      semantics: { ...node.semantics, ariaLabel: placeholder, componentName: pascalCase(node.name || 'input') },
+    };
+  }
+  return node;
+}
+
 function ruleEnhanceNode(node: IRNode, depth: number): IRNode {
   const semantics: Semantics = { ...(node.semantics ?? {}) };
 
@@ -133,8 +227,10 @@ function ruleEnhanceNode(node: IRNode, depth: number): IRNode {
 }
 
 function ruleEnhance(root: IRNode): IRNode {
-  // Two passes: first list detection (needs structural view), then per-node annotation.
-  const withLists = map(root, (n) => detectLists(n));
+  // 四个阶段: 合并重叠兄弟 → 转换 input 节点 → 检测列表 → 逐节点标注
+  const merged = map(root, (n) => mergeOverlappingSiblings(n));
+  const withInputs = map(merged, (n) => convertInputNodes(n));
+  const withLists = map(withInputs, (n) => detectLists(n));
   return walkWithDepth(withLists, 0);
 }
 
