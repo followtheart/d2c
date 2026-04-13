@@ -1,0 +1,660 @@
+{
+  "_class": "page",
+  "do_objectID": "page-render-1",
+  "name": "RenderDemo",
+  "layers": [
+    {
+      "_class": "artboard",
+      "do_objectID": "artboard-render-1",
+      "name": "LoginScreen",
+      "frame": { "x": 0, "y": 0, "width": 375, "height": 667 },
+      "hasBackgroundColor": true,
+      "backgroundColor": { "red": 0.96, "green": 0.97, "blue": 0.98, "alpha": 1 },
+      "style": {},
+      "layers": [
+        {
+          "_class": "rectangle",
+          "do_objectID": "status-bar-bg",
+          "name": "StatusBar",
+          "frame": { "x": 0, "y": 0, "width": 375, "height": 44 },
+          "fixedRadius": 0,
+          "style": {
+            "fills": [
+              {
+                "_class": "fill",
+                "isEnabled": true,
+                "fillType": 1,
+                "gradient": {
+                  "gradientType": 0,
+                  "from": "{0.0, 0.5}",
+                  "to": "{1.0, 0.5}",
+                  "stops": [
+                    { "position": 0, "color": { "red": 0.25, "green": 0.35, "blue": 0.85, "alpha": 1 } },
+                    { "position": 1, "color": { "red": 0.45, "green": 0.28, "blue": 0.78, "alpha": 1 } }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        {
+          "_class": "rectangle",
+          "do_objectID": "hero-bg",
+          "name": "HeroBackground",
+          "frame": { "x": 0, "y": 44, "width": 375, "height": 220 },
+          "fixedRadius": 0,
+          "style": {
+            "fills": [
+              {
+                "_class": "fill",
+                "isEnabled": true,
+                "fillType": 1,
+                "gradient": {
+                  "gradientType": 0,
+                  "from": "{0.0, 0.0}",
+                  "to": "{1.0, 1.0}",
+                  "stops": [
+                    { "position": 0, "color": { "red": 0.25, "green": 0.35, "blue": 0.85, "alpha": 1 } },
+                    { "position": 0.5, "color": { "red": 0.35, "green": 0.30, "blue": 0.82, "alpha": 1 } },
+                    { "position": 1, "color": { "red": 0.45, "green": 0.28, "blue": 0.78, "alpha": 1 } }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        {
+          "_class": "oval",
+          "do_objectID": "avatar-circle",
+          "name": "AvatarCircle",
+          "frame": { "x": 147, "y": 100, "width": 80, "height": 80 },
+          "style": {
+            "fills": [
+              {
+                "_class": "fill",
+                "isEnabled": true,
+                "fillType": 0,
+                "color": { "red": 1, "green": 1, "blue": 1, "alpha": 0.2 }
+              }
+            ],
+            "borders": [
+              {
+                "_class": "border",
+                "isEnabled": true,
+                "color": { "red": 1, "green": 1, "blue": 1, "alpha": 0.6 },
+                "thickness": 3,
+                "position": 0
+              }
+            ]
+          }
+        },
+        {
+          "_class": "text",
+          "do_objectID": "app-title",
+          "name": "AppTitle",
+          "frame": { "x": 0, "y": 195, "width": 375, "height": 30 },
+          "stringValue": "Welcome Back",
+          "style": {
+            "textStyle": {
+              "encodedAttributes": {
+                "MSAttributedStringFontAttribute": {
+                  "attributes": { "name": "Helvetica-Bold", "size": 24 }
+                },
+                "MSAttributedStringColorAttribute": {
+                  "red": 1, "green": 1, "blue": 1, "alpha": 1
+                },
+                "paragraphStyle": { "alignment": 2 }
+              }
+            }
+          }
+        },
+        {
+          "_class": "text",
+          "do_objectID": "app-subtitle",
+          "name": "AppSubtitle",
+          "frame": { "x": 0, "y": 228, "width": 375, "height": 20 },
+          "stringValue": "Sign in to continue",
+          "style": {
+            "textStyle": {
+              "encodedAttributes": {
+                "MSAttributedStringFontAttribute": {
+                  "attributes": { "name": "Helvetica", "size": 14 }
+                },
+                "MSAttributedStringColorAttribute": {
+                  "red": 1, "green": 1, "blue": 1, "alpha": 0.7
+                },
+                "paragraphStyle": { "alignment": 2 }
+              }
+            }
+          }
+        },
+        {
+          "_class": "group",
+          "do_objectID": "form-group",
+          "name": "FormContainer",
+          "frame": { "x": 24, "y": 288, "width": 327, "height": 260 },
+          "style": {},
+          "layers": [
+            {
+              "_class": "rectangle",
+              "do_objectID": "form-bg",
+              "name": "FormBackground",
+              "frame": { "x": 0, "y": 0, "width": 327, "height": 260 },
+              "fixedRadius": 16,
+              "style": {
+                "fills": [
+                  {
+                    "_class": "fill",
+                    "isEnabled": true,
+                    "fillType": 0,
+                    "color": { "red": 1, "green": 1, "blue": 1, "alpha": 1 }
+                  }
+                ],
+                "shadows": [
+                  {
+                    "_class": "shadow",
+                    "isEnabled": true,
+                    "blurRadius": 24,
+                    "offsetX": 0,
+                    "offsetY": 8,
+                    "spread": -4,
+                    "color": { "red": 0, "green": 0, "blue": 0, "alpha": 0.08 }
+                  }
+                ]
+              }
+            },
+            {
+              "_class": "rectangle",
+              "do_objectID": "email-input",
+              "name": "EmailInput",
+              "frame": { "x": 20, "y": 24, "width": 287, "height": 48 },
+              "fixedRadius": 10,
+              "style": {
+                "fills": [
+                  {
+                    "_class": "fill",
+                    "isEnabled": true,
+                    "fillType": 0,
+                    "color": { "red": 0.96, "green": 0.97, "blue": 0.98, "alpha": 1 }
+                  }
+                ],
+                "borders": [
+                  {
+                    "_class": "border",
+                    "isEnabled": true,
+                    "color": { "red": 0.87, "green": 0.89, "blue": 0.91, "alpha": 1 },
+                    "thickness": 1,
+                    "position": 1
+                  }
+                ]
+              }
+            },
+            {
+              "_class": "text",
+              "do_objectID": "email-placeholder",
+              "name": "EmailPlaceholder",
+              "frame": { "x": 36, "y": 37, "width": 200, "height": 18 },
+              "stringValue": "Email address",
+              "style": {
+                "textStyle": {
+                  "encodedAttributes": {
+                    "MSAttributedStringFontAttribute": {
+                      "attributes": { "name": "Helvetica", "size": 15 }
+                    },
+                    "MSAttributedStringColorAttribute": {
+                      "red": 0.6, "green": 0.63, "blue": 0.67, "alpha": 1
+                    },
+                    "paragraphStyle": { "alignment": 0 }
+                  }
+                }
+              }
+            },
+            {
+              "_class": "rectangle",
+              "do_objectID": "password-input",
+              "name": "PasswordInput",
+              "frame": { "x": 20, "y": 84, "width": 287, "height": 48 },
+              "fixedRadius": 10,
+              "style": {
+                "fills": [
+                  {
+                    "_class": "fill",
+                    "isEnabled": true,
+                    "fillType": 0,
+                    "color": { "red": 0.96, "green": 0.97, "blue": 0.98, "alpha": 1 }
+                  }
+                ],
+                "borders": [
+                  {
+                    "_class": "border",
+                    "isEnabled": true,
+                    "color": { "red": 0.87, "green": 0.89, "blue": 0.91, "alpha": 1 },
+                    "thickness": 1,
+                    "position": 1
+                  }
+                ]
+              }
+            },
+            {
+              "_class": "text",
+              "do_objectID": "password-placeholder",
+              "name": "PasswordPlaceholder",
+              "frame": { "x": 36, "y": 97, "width": 200, "height": 18 },
+              "stringValue": "Password",
+              "style": {
+                "textStyle": {
+                  "encodedAttributes": {
+                    "MSAttributedStringFontAttribute": {
+                      "attributes": { "name": "Helvetica", "size": 15 }
+                    },
+                    "MSAttributedStringColorAttribute": {
+                      "red": 0.6, "green": 0.63, "blue": 0.67, "alpha": 1
+                    },
+                    "paragraphStyle": { "alignment": 0 }
+                  }
+                }
+              }
+            },
+            {
+              "_class": "rectangle",
+              "do_objectID": "signin-btn",
+              "name": "SignInButton",
+              "frame": { "x": 20, "y": 152, "width": 287, "height": 48 },
+              "fixedRadius": 10,
+              "style": {
+                "fills": [
+                  {
+                    "_class": "fill",
+                    "isEnabled": true,
+                    "fillType": 1,
+                    "gradient": {
+                      "gradientType": 0,
+                      "from": "{0.0, 0.5}",
+                      "to": "{1.0, 0.5}",
+                      "stops": [
+                        { "position": 0, "color": { "red": 0.25, "green": 0.35, "blue": 0.85, "alpha": 1 } },
+                        { "position": 1, "color": { "red": 0.45, "green": 0.28, "blue": 0.78, "alpha": 1 } }
+                      ]
+                    }
+                  }
+                ],
+                "shadows": [
+                  {
+                    "_class": "shadow",
+                    "isEnabled": true,
+                    "blurRadius": 12,
+                    "offsetX": 0,
+                    "offsetY": 4,
+                    "spread": -2,
+                    "color": { "red": 0.3, "green": 0.3, "blue": 0.8, "alpha": 0.3 }
+                  }
+                ]
+              }
+            },
+            {
+              "_class": "text",
+              "do_objectID": "signin-label",
+              "name": "SignInLabel",
+              "frame": { "x": 20, "y": 164, "width": 287, "height": 22 },
+              "stringValue": "Sign In",
+              "style": {
+                "textStyle": {
+                  "encodedAttributes": {
+                    "MSAttributedStringFontAttribute": {
+                      "attributes": { "name": "Helvetica-Bold", "size": 16 }
+                    },
+                    "MSAttributedStringColorAttribute": {
+                      "red": 1, "green": 1, "blue": 1, "alpha": 1
+                    },
+                    "paragraphStyle": { "alignment": 2 }
+                  }
+                }
+              }
+            },
+            {
+              "_class": "text",
+              "do_objectID": "forgot-password",
+              "name": "ForgotPassword",
+              "frame": { "x": 20, "y": 216, "width": 287, "height": 18 },
+              "stringValue": "Forgot your password?",
+              "style": {
+                "textStyle": {
+                  "encodedAttributes": {
+                    "MSAttributedStringFontAttribute": {
+                      "attributes": { "name": "Helvetica", "size": 13 }
+                    },
+                    "MSAttributedStringColorAttribute": {
+                      "red": 0.35, "green": 0.32, "blue": 0.80, "alpha": 1
+                    },
+                    "paragraphStyle": { "alignment": 2 }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "_class": "group",
+          "do_objectID": "social-group",
+          "name": "SocialLogin",
+          "frame": { "x": 24, "y": 572, "width": 327, "height": 44 },
+          "style": {},
+          "layers": [
+            {
+              "_class": "rectangle",
+              "do_objectID": "google-btn",
+              "name": "GoogleButton",
+              "frame": { "x": 0, "y": 0, "width": 155, "height": 44 },
+              "fixedRadius": 10,
+              "style": {
+                "fills": [
+                  {
+                    "_class": "fill",
+                    "isEnabled": true,
+                    "fillType": 0,
+                    "color": { "red": 1, "green": 1, "blue": 1, "alpha": 1 }
+                  }
+                ],
+                "borders": [
+                  {
+                    "_class": "border",
+                    "isEnabled": true,
+                    "color": { "red": 0.87, "green": 0.89, "blue": 0.91, "alpha": 1 },
+                    "thickness": 1,
+                    "position": 1
+                  }
+                ]
+              }
+            },
+            {
+              "_class": "text",
+              "do_objectID": "google-label",
+              "name": "GoogleLabel",
+              "frame": { "x": 0, "y": 13, "width": 155, "height": 18 },
+              "stringValue": "Google",
+              "style": {
+                "textStyle": {
+                  "encodedAttributes": {
+                    "MSAttributedStringFontAttribute": {
+                      "attributes": { "name": "Helvetica-Medium", "size": 14 }
+                    },
+                    "MSAttributedStringColorAttribute": {
+                      "red": 0.2, "green": 0.2, "blue": 0.2, "alpha": 1
+                    },
+                    "paragraphStyle": { "alignment": 2 }
+                  }
+                }
+              }
+            },
+            {
+              "_class": "rectangle",
+              "do_objectID": "apple-btn",
+              "name": "AppleButton",
+              "frame": { "x": 172, "y": 0, "width": 155, "height": 44 },
+              "fixedRadius": 10,
+              "style": {
+                "fills": [
+                  {
+                    "_class": "fill",
+                    "isEnabled": true,
+                    "fillType": 0,
+                    "color": { "red": 0.1, "green": 0.1, "blue": 0.1, "alpha": 1 }
+                  }
+                ]
+              }
+            },
+            {
+              "_class": "text",
+              "do_objectID": "apple-label",
+              "name": "AppleLabel",
+              "frame": { "x": 172, "y": 13, "width": 155, "height": 18 },
+              "stringValue": "Apple",
+              "style": {
+                "textStyle": {
+                  "encodedAttributes": {
+                    "MSAttributedStringFontAttribute": {
+                      "attributes": { "name": "Helvetica-Medium", "size": 14 }
+                    },
+                    "MSAttributedStringColorAttribute": {
+                      "red": 1, "green": 1, "blue": 1, "alpha": 1
+                    },
+                    "paragraphStyle": { "alignment": 2 }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "_class": "text",
+          "do_objectID": "divider-text",
+          "name": "OrDivider",
+          "frame": { "x": 0, "y": 564, "width": 375, "height": 16 },
+          "stringValue": "or continue with",
+          "style": {
+            "textStyle": {
+              "encodedAttributes": {
+                "MSAttributedStringFontAttribute": {
+                  "attributes": { "name": "Helvetica", "size": 12 }
+                },
+                "MSAttributedStringColorAttribute": {
+                  "red": 0.6, "green": 0.63, "blue": 0.67, "alpha": 1
+                },
+                "paragraphStyle": { "alignment": 2 }
+              }
+            }
+          }
+        },
+        {
+          "_class": "text",
+          "do_objectID": "signup-text",
+          "name": "SignUpPrompt",
+          "frame": { "x": 0, "y": 636, "width": 375, "height": 18 },
+          "stringValue": "Don't have an account? Sign Up",
+          "style": {
+            "textStyle": {
+              "encodedAttributes": {
+                "MSAttributedStringFontAttribute": {
+                  "attributes": { "name": "Helvetica", "size": 13 }
+                },
+                "MSAttributedStringColorAttribute": {
+                  "red": 0.45, "green": 0.47, "blue": 0.5, "alpha": 1
+                },
+                "paragraphStyle": { "alignment": 2 }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "_class": "artboard",
+      "do_objectID": "artboard-render-2",
+      "name": "ProfileCard",
+      "frame": { "x": 425, "y": 0, "width": 340, "height": 200 },
+      "hasBackgroundColor": true,
+      "backgroundColor": { "red": 0.96, "green": 0.97, "blue": 0.98, "alpha": 1 },
+      "style": {},
+      "layers": [
+        {
+          "_class": "rectangle",
+          "do_objectID": "profile-card-bg",
+          "name": "CardBg",
+          "frame": { "x": 20, "y": 20, "width": 300, "height": 160 },
+          "fixedRadius": 16,
+          "style": {
+            "fills": [
+              {
+                "_class": "fill",
+                "isEnabled": true,
+                "fillType": 0,
+                "color": { "red": 1, "green": 1, "blue": 1, "alpha": 1 }
+              }
+            ],
+            "shadows": [
+              {
+                "_class": "shadow",
+                "isEnabled": true,
+                "blurRadius": 20,
+                "offsetX": 0,
+                "offsetY": 6,
+                "spread": -6,
+                "color": { "red": 0, "green": 0, "blue": 0, "alpha": 0.1 }
+              }
+            ]
+          }
+        },
+        {
+          "_class": "oval",
+          "do_objectID": "profile-avatar",
+          "name": "Avatar",
+          "frame": { "x": 40, "y": 40, "width": 60, "height": 60 },
+          "style": {
+            "fills": [
+              {
+                "_class": "fill",
+                "isEnabled": true,
+                "fillType": 1,
+                "gradient": {
+                  "gradientType": 1,
+                  "from": "{0.5, 0.5}",
+                  "to": "{1.0, 0.5}",
+                  "stops": [
+                    { "position": 0, "color": { "red": 0.55, "green": 0.40, "blue": 0.90, "alpha": 1 } },
+                    { "position": 1, "color": { "red": 0.35, "green": 0.28, "blue": 0.75, "alpha": 1 } }
+                  ]
+                }
+              }
+            ],
+            "borders": [
+              {
+                "_class": "border",
+                "isEnabled": true,
+                "color": { "red": 1, "green": 1, "blue": 1, "alpha": 1 },
+                "thickness": 3,
+                "position": 2
+              }
+            ]
+          }
+        },
+        {
+          "_class": "text",
+          "do_objectID": "profile-name",
+          "name": "ProfileName",
+          "frame": { "x": 120, "y": 46, "width": 180, "height": 22 },
+          "stringValue": "Ada Lovelace",
+          "style": {
+            "textStyle": {
+              "encodedAttributes": {
+                "MSAttributedStringFontAttribute": {
+                  "attributes": { "name": "Helvetica-Bold", "size": 18 }
+                },
+                "MSAttributedStringColorAttribute": {
+                  "red": 0.12, "green": 0.12, "blue": 0.15, "alpha": 1
+                },
+                "paragraphStyle": { "alignment": 0 }
+              }
+            }
+          }
+        },
+        {
+          "_class": "text",
+          "do_objectID": "profile-role",
+          "name": "ProfileRole",
+          "frame": { "x": 120, "y": 72, "width": 180, "height": 18 },
+          "stringValue": "Mathematician & Writer",
+          "style": {
+            "textStyle": {
+              "encodedAttributes": {
+                "MSAttributedStringFontAttribute": {
+                  "attributes": { "name": "Helvetica", "size": 13 }
+                },
+                "MSAttributedStringColorAttribute": {
+                  "red": 0.5, "green": 0.52, "blue": 0.55, "alpha": 1
+                },
+                "paragraphStyle": { "alignment": 0 }
+              }
+            }
+          }
+        },
+        {
+          "_class": "rectangle",
+          "do_objectID": "profile-divider",
+          "name": "Divider",
+          "frame": { "x": 40, "y": 118, "width": 260, "height": 1 },
+          "fixedRadius": 0,
+          "style": {
+            "fills": [
+              {
+                "_class": "fill",
+                "isEnabled": true,
+                "fillType": 0,
+                "color": { "red": 0.92, "green": 0.93, "blue": 0.94, "alpha": 1 }
+              }
+            ]
+          }
+        },
+        {
+          "_class": "text",
+          "do_objectID": "stat-posts",
+          "name": "StatPosts",
+          "frame": { "x": 40, "y": 132, "width": 80, "height": 36 },
+          "stringValue": "128\nPosts",
+          "style": {
+            "textStyle": {
+              "encodedAttributes": {
+                "MSAttributedStringFontAttribute": {
+                  "attributes": { "name": "Helvetica-Bold", "size": 14 }
+                },
+                "MSAttributedStringColorAttribute": {
+                  "red": 0.12, "green": 0.12, "blue": 0.15, "alpha": 1
+                },
+                "paragraphStyle": { "alignment": 2 }
+              }
+            }
+          }
+        },
+        {
+          "_class": "text",
+          "do_objectID": "stat-followers",
+          "name": "StatFollowers",
+          "frame": { "x": 130, "y": 132, "width": 80, "height": 36 },
+          "stringValue": "2.4k\nFollowers",
+          "style": {
+            "textStyle": {
+              "encodedAttributes": {
+                "MSAttributedStringFontAttribute": {
+                  "attributes": { "name": "Helvetica-Bold", "size": 14 }
+                },
+                "MSAttributedStringColorAttribute": {
+                  "red": 0.12, "green": 0.12, "blue": 0.15, "alpha": 1
+                },
+                "paragraphStyle": { "alignment": 2 }
+              }
+            }
+          }
+        },
+        {
+          "_class": "text",
+          "do_objectID": "stat-following",
+          "name": "StatFollowing",
+          "frame": { "x": 220, "y": 132, "width": 80, "height": 36 },
+          "stringValue": "847\nFollowing",
+          "style": {
+            "textStyle": {
+              "encodedAttributes": {
+                "MSAttributedStringFontAttribute": {
+                  "attributes": { "name": "Helvetica-Bold", "size": 14 }
+                },
+                "MSAttributedStringColorAttribute": {
+                  "red": 0.12, "green": 0.12, "blue": 0.15, "alpha": 1
+                },
+                "paragraphStyle": { "alignment": 2 }
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
