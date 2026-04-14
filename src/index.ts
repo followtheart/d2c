@@ -14,6 +14,13 @@ export type {
   NodeLlmProviderConfig,
   NodeLlmProviderName,
 } from './ai/nodeLlmProvider';
+export { VisionProvider, buildPairPrompt, buildOverallPrompt } from './ai/visionProvider';
+export type {
+  VisionBackend,
+  VisionProviderConfig,
+  ImageInput,
+  StageAnalysis,
+} from './ai/visionProvider';
 export { matchComponents } from './ai/componentMatch';
 export type { LibraryTarget, ComponentRule } from './ai/componentMatch';
 export {
@@ -57,6 +64,13 @@ export type {
   StageSnapshot,
   VerificationResult,
 } from './pipeline/verify';
+export { compareStages } from './pipeline/stageCompare';
+export type {
+  PairAnalysis,
+  OverallAnalysis,
+  ComparisonReport,
+} from './pipeline/stageCompare';
+export { reportToMarkdown, reportToHtml, reportToJson } from './pipeline/compareReport';
 export { loadConfig, resolveApiKey } from './config';
 export type { D2CConfig } from './config';
 export {

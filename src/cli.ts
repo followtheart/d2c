@@ -51,6 +51,20 @@ interface Args {
   verify?: boolean;
   /** Directory to write per-stage snapshot JSON files. */
   verifyDir?: string;
+  /** Directory containing per-stage snapshot JSON files to render. */
+  renderSnapshots?: string;
+  /** Output directory for rendered snapshot images / HTML files. */
+  renderOutput?: string;
+  /** Format for snapshot rendering: png | html (default: png). */
+  snapshotFormat?: 'png' | 'html';
+  /** Run multimodal stage comparison after rendering. */
+  compareStages?: boolean;
+  /** Output path for comparison report (default: <render-output>/report.md). */
+  compareReport?: string;
+  /** Vision provider backend: openrouter | anthropic (default: openrouter). */
+  visionProvider?: 'openrouter' | 'anthropic';
+  /** Vision model id override. */
+  visionModel?: string;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -137,6 +151,27 @@ function parseArgs(argv: string[]): Args {
         args.verifyDir = next();
         args.verify = true; // implies --verify
         break;
+      case '--render-snapshots':
+        args.renderSnapshots = next();
+        break;
+      case '--render-output':
+        args.renderOutput = next();
+        break;
+      case '--snapshot-format':
+        args.snapshotFormat = next() as 'png' | 'html';
+        break;
+      case '--compare-stages':
+        args.compareStages = true;
+        break;
+      case '--compare-report':
+        args.compareReport = next();
+        break;
+      case '--vision-provider':
+        args.visionProvider = next() as 'openrouter' | 'anthropic';
+        break;
+      case '--vision-model':
+        args.visionModel = next();
+        break;
       case '--verbose':
       case '-v':
         args.verbose = true;
@@ -192,6 +227,22 @@ Options:
                                  Prints a verification report to stderr.
       --verify-dir <dir>           Write per-stage snapshot JSON files to <dir>.
                                  Implies --verify.
+      --render-snapshots <dir>     Render per-stage snapshot JSON files from
+                                 <dir> into visual output (PNG or HTML).
+      --render-output <dir>        Output directory for rendered snapshots
+                                 (default: <render-snapshots>/rendered).
+      --snapshot-format <fmt>      Snapshot render format: png | html
+                                 (default: png). html does not require
+                                 Playwright.
+      --compare-stages             Run multimodal LLM comparison on
+                                 rendered stage screenshots (PNG).
+                                 Requires --render-output with PNGs and
+                                 an API key (OPENROUTER_API_KEY etc.).
+      --compare-report <file>      Output path for comparison report
+                                 (default: <render-output>/report.md).
+      --vision-provider <name>     Vision backend: openrouter | anthropic
+                                 (default: openrouter).
+      --vision-model <id>          Override the vision model id.
       --render                     Render the design visually (SVG / HTML)
                                  instead of generating code. Implies
                                  --format sketch (or auto-detected).
@@ -221,6 +272,10 @@ Examples:
   d2c -i sketch.json --render --render-scale 2 -o out/preview
   d2c -i design.make --render -o out/make-preview
   d2c -i make-decoded.json -f make -p react -o out/react
+  d2c --render-snapshots snapshots/ --render-output images/
+  d2c --render-snapshots snapshots/ --snapshot-format html --render-output out/html
+  d2c --compare-stages --render-output images/ --compare-report report.md
+  OPENROUTER_API_KEY=... d2c --compare-stages --render-output images/ --vision-model openai/gpt-4o
 `;
 
 /**
@@ -284,6 +339,135 @@ function resolveSketchDocumentRefs(
   return pages.length === 1 ? pages[0] : { pages };
 }
 
+/**
+ * Run multimodal stage comparison on rendered PNG screenshots.
+ */
+async function compareStagesCommand(args: Args): Promise<void> {
+  const imageDir = args.renderOutput;
+  if (!imageDir || !fs.existsSync(imageDir)) {
+    console.error('ERROR: --compare-stages requires --render-output <dir> with PNG screenshots.');
+    process.exit(2);
+  }
+
+  const visionBackend = args.visionProvider ?? 'openrouter';
+  const apiKey = visionBackend === 'anthropic'
+    ? process.env.ANTHROPIC_API_KEY
+    : process.env.OPENROUTER_API_KEY;
+
+  if (!apiKey) {
+    const envVar = visionBackend === 'anthropic' ? 'ANTHROPIC_API_KEY' : 'OPENROUTER_API_KEY';
+    console.error(
+      `ERROR: --compare-stages with --vision-provider ${visionBackend} requires ${envVar} env var.`,
+    );
+    process.exit(2);
+  }
+
+  const { VisionProvider } = await import('./ai/visionProvider');
+  const { compareStages } = await import('./pipeline/stageCompare');
+  const { reportToMarkdown, reportToHtml, reportToJson } = await import('./pipeline/compareReport');
+
+  const vision = new VisionProvider({
+    provider: visionBackend,
+    apiKey,
+    model: args.visionModel,
+  });
+
+  console.error(`d2c compare-stages: analyzing screenshots in "${imageDir}"…`);
+  const report = await compareStages(vision, imageDir, {
+    onProgress: (msg) => console.error(msg),
+  });
+
+  const reportPath = args.compareReport ?? path.join(imageDir, 'report.md');
+  const ext = path.extname(reportPath).toLowerCase();
+
+  let content: string;
+  if (ext === '.json') {
+    content = reportToJson(report);
+  } else if (ext === '.html') {
+    content = reportToHtml(report, imageDir);
+  } else {
+    content = reportToMarkdown(report, imageDir);
+  }
+
+  fs.mkdirSync(path.dirname(reportPath) || '.', { recursive: true });
+  fs.writeFileSync(reportPath, content);
+  console.error(`d2c compare-stages: wrote report → ${reportPath}`);
+
+  // Print quality summary
+  console.error('\n  Quality Summary:');
+  for (const p of report.pairs) {
+    console.error(`    ${p.from} → ${p.to}: ${p.qualityScore}/10`);
+  }
+  console.error(`    Overall (${report.overall.from} → ${report.overall.to}): ${report.overall.qualityScore}/10\n`);
+}
+
+/**
+ * Render per-stage snapshot JSON files to HTML or PNG.
+ *
+ * Reads every `<stage>.json` in `--render-snapshots <dir>`, passes
+ * each through the matching SnapshotRenderer, then either writes
+ * standalone HTML files or uses Playwright to capture PNG screenshots.
+ */
+async function renderSnapshotsCommand(args: Args): Promise<void> {
+  const snapshotDir = args.renderSnapshots!;
+  if (!fs.existsSync(snapshotDir)) {
+    console.error(`ERROR: snapshot directory not found: ${snapshotDir}`);
+    process.exit(2);
+  }
+
+  const outDir = args.renderOutput ?? path.join(snapshotDir, 'rendered');
+  const format = args.snapshotFormat ?? 'png';
+
+  const { getSnapshotRenderer } = await import('./renderer/snapshotRendererMap');
+  const snapshotFiles = fs.readdirSync(snapshotDir).filter((f) => f.endsWith('.json'));
+
+  if (snapshotFiles.length === 0) {
+    console.error(`No snapshot JSON files found in "${snapshotDir}"`);
+    process.exit(2);
+  }
+
+  type StageSnapshot = import('./pipeline/verify').StageSnapshot;
+
+  const rendered: { stage: string; html: string; outPath: string }[] = [];
+
+  for (const file of snapshotFiles) {
+    const stage = path.basename(file, '.json');
+    const renderer = getSnapshotRenderer(stage as import('./pipeline/verify').StageName);
+    if (!renderer) {
+      if (args.verbose) console.error(`  skip ${file} (no renderer for stage "${stage}")`);
+      continue;
+    }
+    const snap: StageSnapshot = JSON.parse(
+      fs.readFileSync(path.join(snapshotDir, file), 'utf8'),
+    );
+    const html = renderer.render(snap);
+    const ext = format === 'html' ? 'html' : 'png';
+    const outPath = path.join(outDir, `${stage}.${ext}`);
+    rendered.push({ stage, html, outPath });
+  }
+
+  if (rendered.length === 0) {
+    console.error('No renderable snapshots found.');
+    process.exit(2);
+  }
+
+  fs.mkdirSync(outDir, { recursive: true });
+
+  if (format === 'html') {
+    for (const r of rendered) {
+      fs.writeFileSync(r.outPath, r.html);
+      if (args.verbose) console.error(`  wrote ${r.outPath}`);
+    }
+    console.error(`d2c render-snapshots: wrote ${rendered.length} HTML file(s) → ${outDir}`);
+  } else {
+    const { captureScreenshots } = await import('./renderer/screenshotService');
+    const jobs = rendered.map((r) => ({ html: r.html, outputPath: r.outPath }));
+    console.error(`d2c render-snapshots: capturing ${jobs.length} screenshot(s)…`);
+    await captureScreenshots(jobs);
+    console.error(`d2c render-snapshots: wrote ${jobs.length} PNG file(s) → ${outDir}`);
+  }
+}
+
 async function main(): Promise<void> {
   let args: Args;
   try {
@@ -294,12 +478,23 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  if (args.help || !args.input) {
+  if (args.help || (!args.input && !args.renderSnapshots && !args.compareStages)) {
     console.log(USAGE);
     process.exit(args.help ? 0 : 1);
   }
 
-  const raw = resolveInput(args.input, args.format);
+  // ─── Standalone modes (no --input required) ─────────────────────
+  if (!args.input) {
+    if (args.renderSnapshots) {
+      await renderSnapshotsCommand(args);
+    }
+    if (args.compareStages) {
+      await compareStagesCommand(args);
+    }
+    return;
+  }
+
+  const raw = resolveInput(args.input!, args.format);
 
   // ─── Render mode: Sketch / Make → SVG / HTML preview ────────────
   if (args.render) {
@@ -549,6 +744,15 @@ async function main(): Promise<void> {
         fs.writeFileSync(filePath, JSON.stringify(snapshotToJSON(snap), null, 2));
       }
       console.error(`d2c verify: wrote ${verification.snapshots.length} snapshot(s) → ${args.verifyDir}`);
+
+      // Auto-render snapshots if --render-snapshots points to the same dir
+      if (args.renderSnapshots) {
+        await renderSnapshotsCommand(args);
+      }
+      // Auto-compare stages if --compare-stages is also set
+      if (args.compareStages) {
+        await compareStagesCommand(args);
+      }
     }
   }
 

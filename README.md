@@ -5,7 +5,8 @@ An end-to-end **Design-to-Code (D2C)** pipeline that converts design files
 **React + Tailwind**, **Vue 3 SFC**, **HTML + CSS**, **React Native**, or
 **Flutter** source code — with design-token extraction, Tailwind preset
 generation, antd / MUI component matching, responsive breakpoint inference,
-and protected `// ai:ignore` regions for safe regeneration.
+protected `// ai:ignore` regions for safe regeneration,**阶段快照可视化**,
+以及**多模态 LLM 阶段比对分析**。
 
 Based on the architecture described in [`doc/opus4.6.md`](doc/opus4.6.md) and
 [`doc/qwen3.6.md`](doc/qwen3.6.md):
@@ -68,7 +69,7 @@ Based on the architecture described in [`doc/opus4.6.md`](doc/opus4.6.md) and
 ```bash
 npm install        # installs only typescript + @types/node (zero runtime deps)
 npm run build
-npm test           # runs the node:test suite (9 tests, end-to-end)
+npm test           # runs the node:test suite (161 tests, end-to-end)
 
 # Generate React code from the sample design
 node dist/cli.js --input examples/sample-design.json --platform react --out out/react
@@ -108,23 +109,42 @@ DEEPSEEK_API_KEY=sk-... node dist/cli.js \
   -o, --out <dir|->              Output directory, or '-' for stdout
   -p, --platform <name>          Target platform: react | vue | html |
                                  react-native | flutter (default: react)
-  -f, --format <name>            Input format: figma | sketch | native | auto
+  -f, --format <name>            Input format: figma | sketch | native | make | auto
       --emit-ir <file>           Also write the intermediate IR JSON
       --emit-tokens <file>       Write design tokens (style-dictionary JSON)
       --emit-tailwind <file>     Write a Tailwind preset (theme.extend) module
-      --emit-diff <file>         Write a structural IR diff against --prev-ir
+      --emit-diff <file>         Write structural IR diff against --prev-ir
       --component-library <lib>  Match nodes to a component library: antd | mui
       --responsive <bp>=<file>   Add a responsive variant for breakpoint <bp>
                                  (repeatable, e.g. --responsive sm=mobile.json)
       --prev-ir <file>           Previous IR JSON for ai:ignore region merge
-      --use-claude               Use Claude for the semantic LLM pass
-      --llm-provider <name>      Use @node-llm/core: openai | anthropic |
+      --no-llm                   Skip LLM semantic enhancement entirely
+      --use-claude               Use Claude as the semantic LLM provider
+                                 (requires ANTHROPIC_API_KEY env var)
+      --llm-provider <name>      Use @node-llm/core as the semantic LLM
+                                 provider. Supports: openai | anthropic |
                                  gemini | deepseek | openrouter | ollama |
                                  mistral | xai | bedrock
       --llm-model <id>           Model id for --llm-provider
       --llm-base-url <url>       Override base URL (gateways / Ollama)
-  -v, --verbose
-  -h, --help
+      --all-pages                Process all pages in the design
+      --verify                   Run pipeline with stage-by-stage verification
+      --verify-dir <dir>         Write per-stage snapshot JSON files to <dir>
+      --render-snapshots <dir>   Render per-stage snapshot JSON files from
+                                 <dir> into visual output (PNG or HTML)
+      --render-output <dir>      Output directory for rendered snapshots
+      --snapshot-format <fmt>    Snapshot render format: png | html (default: png)
+      --compare-stages           Run multimodal LLM comparison on rendered
+                                 stage screenshots (PNG)
+      --compare-report <file>    Output path for comparison report
+      --vision-provider <name>   Vision backend: openrouter | anthropic
+                                 (default: openrouter)
+      --vision-model <id>        Override the vision model id
+      --render                   Render the design visually (SVG / HTML)
+      --render-format <fmt>      Render output format: svg | html
+      --render-scale <n>         Scale factor for rendered output
+  -v, --verbose                  Verbose logging
+  -h, --help                     Show this help
 ```
 
 ### Examples
@@ -150,6 +170,26 @@ node dist/cli.js -i examples/sample-design.json \
 
 # Sketch (pre-extracted page JSON from a .sketch ZIP)
 node dist/cli.js -i examples/sketch-sample.json -f sketch -p react -o out/sketch
+
+# Pipeline verification with stage snapshots
+node dist/cli.js -i examples/sample-design.json -p react -o out/react \
+    --verify-dir snapshots/
+
+# Render stage snapshots to visual HTML
+node dist/cli.js --render-snapshots snapshots/ --snapshot-format html \
+    --render-output out/rendered/
+
+# Full pipeline: verify → render → multimodal comparison
+OPENROUTER_API_KEY=... node dist/cli.js -i examples/sample-design.json -p react \
+    -o out/react --verify-dir snap/ --render-snapshots snap/ --render-output img/ \
+    --compare-stages --compare-report report.html
+
+# Standalone stage comparison on existing screenshots
+node dist/cli.js --compare-stages --render-output img/ --compare-report report.md
+
+# Use Anthropic as the vision backend
+ANTHROPIC_API_KEY=... node dist/cli.js --compare-stages --render-output img/ \
+    --vision-provider anthropic --compare-report report.json
 ```
 
 ## LLM API Token 配置
@@ -391,6 +431,80 @@ Given absolute coordinates and sizes, the inference engine (`src/layout/inferenc
    - Users can also plug in any custom backend (Qwen-VL, local vLLM, etc.) by
      implementing the one-method `LLMProvider` interface.
 
+## 阶段快照渲染与多模态比对
+
+d2c 支持将流水线各阶段的中间结果**可视化**，并通过**多模态 LLM**自动比对
+相邻阶段的渲染结果，分析信息增益与损失。
+
+### 1. 阶段快照（Stage Snapshots）
+
+使用 `--verify-dir` 可将每个流水线阶段的 IR / tokens / codegen 结果保存为 JSON：
+
+```bash
+node dist/cli.js -i design.json -p react -o out/react --verify-dir snapshots/
+# → snapshots/parse.json, layout.json, semantics.json, tokens.json, codegen.json
+```
+
+### 2. 快照渲染（Snapshot Rendering）
+
+每个阶段有一个专属渲染器，将 JSON 快照转为可视化 HTML/PNG：
+
+| 阶段 | 渲染器 | 可视化内容 |
+|------|--------|------------|
+| parse | `parseRenderer` | 线框图——节点层级、尺寸标注 |
+| layout | `layoutRenderer` | 布局标注——flex 方向、gap、对齐方式 |
+| semantics | `semanticsRenderer` | 语义角色——按角色着色、aria 标签 |
+| tokens | `tokensRenderer` | 设计令牌——色板、字体、间距一览 |
+| codegen | `codegenRenderer` | 生成代码——语法高亮 + 实时预览 |
+
+```bash
+# 渲染为 HTML（无需 Playwright）
+node dist/cli.js --render-snapshots snapshots/ --snapshot-format html --render-output out/
+
+# 渲染为 PNG（需要 Playwright + Chromium）
+node dist/cli.js --render-snapshots snapshots/ --snapshot-format png --render-output out/
+```
+
+### 3. 多模态比对分析（Vision Comparison）
+
+通过 `--compare-stages` 启用多模态 LLM 比对。支持 **OpenRouter**（默认）和
+**Anthropic** 两种视觉后端：
+
+```bash
+# OpenRouter（默认使用 gpt-4o）
+OPENROUTER_API_KEY=sk-or-xxx node dist/cli.js --compare-stages \
+    --render-output img/ --compare-report report.md
+
+# Anthropic（默认使用 claude-sonnet-4-20250514）
+ANTHROPIC_API_KEY=sk-ant-xxx node dist/cli.js --compare-stages \
+    --render-output img/ --vision-provider anthropic
+```
+
+比对引擎会：
+- 按 parse → layout → semantics → tokens → codegen 顺序两两比较相邻阶段
+- 额外进行首尾阶段（parse vs codegen）的总体评估
+- 为每对输出 `visualDiff`、`infoGain`、`dataLoss`、`qualityScore`
+- 生成 Markdown / HTML（含内嵌截图）/ JSON 格式的报告
+
+### 作为库使用
+
+```ts
+import {
+  VisionProvider,
+  compareStages,
+  reportToMarkdown,
+  reportToHtml,
+} from 'd2c';
+
+const vision = new VisionProvider({
+  backend: 'openrouter',
+  apiKey: process.env.OPENROUTER_API_KEY!,
+});
+
+const report = await compareStages(vision, './rendered-images/');
+console.log(reportToMarkdown(report));
+```
+
 ## Adding new targets
 
 Implement `CodeGenerator` (`src/codegen/base.ts`) and register in
@@ -406,28 +520,34 @@ Mapped to the phases described in the design docs:
 - [x] **P0**: IR, native + Figma parsing, layout inference, React/Vue/HTML
       generation, end-to-end tests
 - [x] **P1**: Sketch parser (pre-extracted JSON), Tailwind preset / theme
-      extraction. _Open: ZIP-level `.sketch` reader, Playwright visual
-      regression._
+      extraction. _Open: ZIP-level `.sketch` reader._
 - [x] **P2**: Design tokens extraction (`style-dictionary` shape),
       IR diff + `// ai:ignore` protected regions, component library
       matching (antd / MUI).
 - [x] **P3**: React Native + Flutter generators, responsive breakpoint
       inference (multi-viewport diff). _Open: SwiftUI generator._
+- [x] **P4**: 阶段快照渲染器（parse / layout / semantics / tokens / codegen
+      五个阶段各有专属可视化渲染器），Playwright 截图服务，批量渲染 CLI。
+- [x] **P5**: 多模态阶段比对分析 — VisionProvider 支持 OpenRouter / Anthropic
+      视觉后端，自动两两比较相邻阶段渲染结果并生成 Markdown / HTML / JSON 报告。
 
 ## Directory layout
 
 ```
 src/
 ├── ir/            # Intermediate representation types & runtime validation
-├── parser/        # Figma + Sketch + native design JSON parsers
+├── parser/        # Figma + Sketch + native + Make design JSON parsers
 ├── layout/        # Deterministic layout inference + responsive merge
 ├── ai/            # Rule-based + optional LLM semantic enhancer +
-│                  # antd/MUI component matching
+│                  # antd/MUI component matching + VisionProvider
 ├── tokens/        # Design token extraction + Tailwind preset generator
 ├── diff/          # IR diff + ai:ignore protected region merge
 ├── codegen/       # React, Vue, HTML, React Native, Flutter generators
-├── pipeline/      # End-to-end orchestration
-├── tests/         # node:test suite (no extra deps)
+├── renderer/      # SVG/HTML design preview + stage snapshot renderers +
+│                  # Playwright screenshot service
+├── pipeline/      # End-to-end orchestration + verification +
+│                  # multimodal stage comparison + report generation
+├── tests/         # node:test suite (161 tests, no extra deps)
 ├── utils/         # Shared helpers (color, tree walking, case)
 ├── index.ts       # Library entry
 └── cli.ts         # CLI entry
@@ -435,7 +555,14 @@ examples/
 ├── sample-design.json         # Native format example (UserCard, desktop)
 ├── sample-design-mobile.json  # Same UserCard at the sm breakpoint
 ├── figma-sample.json          # Figma REST API shape example
+├── figma-make-sample.json     # Figma Make format example
 └── sketch-sample.json         # Pre-extracted Sketch page JSON
+snapshots/
+├── parse.json                 # Stage snapshot examples
+├── layout.json
+├── semantics.json
+├── tokens.json
+└── codegen.json
 doc/
 ├── opus4.6.md     # Original design doc (English / Chinese)
 └── qwen3.6.md     # Alternate design doc

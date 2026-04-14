@@ -39,6 +39,17 @@ export { buildMakeRenderTree } from './makeRenderTree';
 export type { MakeRenderOptions, MakeRenderResult } from './makeRenderTree';
 export { renderMakeHtmlPreview } from './makeHtmlPreview';
 
+// ── Snapshot stage renderers ────────────────────────────────────────
+export type { SnapshotRenderer } from './snapshotRenderer';
+export { parseRenderer } from './parseRenderer';
+export { layoutRenderer } from './layoutRenderer';
+export { semanticsRenderer } from './semanticsRenderer';
+export { tokensRenderer } from './tokensRenderer';
+export { codegenRenderer } from './codegenRenderer';
+export { getSnapshotRenderer, snapshotRenderers } from './snapshotRendererMap';
+export { captureScreenshot, captureScreenshots } from './screenshotService';
+export type { ScreenshotOptions, ScreenshotJob } from './screenshotService';
+
 export { buildRenderTree, extractPages } from './sketchRenderTree';
 export { renderArtboardToSvg, renderDocumentToSvg } from './svgRenderer';
 export { renderToHtmlPreview } from './htmlPreview';
