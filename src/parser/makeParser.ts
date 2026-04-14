@@ -770,7 +770,7 @@ export async function parseMakeMultiPage(buf: Buffer): Promise<IRDocument[]> {
  * }
  * ```
  */
-export function parseMakeJson(raw: unknown): IRDocument {
+export function parseMakeJsonToMakeDoc(raw: unknown): MakeDocument {
   if (!raw || typeof raw !== 'object') {
     throw new Error('parseMakeJson: input must be an object');
   }
@@ -793,15 +793,17 @@ export function parseMakeJson(raw: unknown): IRDocument {
     }
   }
 
-  const doc: MakeDocument = {
+  return {
     name: (obj.name as string) ?? 'Make Design',
     nodes,
     codeFiles,
     width: typeof obj.width === 'number' ? obj.width : 1440,
     height: typeof obj.height === 'number' ? obj.height : 900,
   };
+}
 
-  return makeDocToIR(doc);
+export function parseMakeJson(raw: unknown): IRDocument {
+  return makeDocToIR(parseMakeJsonToMakeDoc(raw));
 }
 
 /**

@@ -296,10 +296,10 @@ async function main(): Promise<void> {
     const isMakeBuf = Buffer.isBuffer(raw) || (raw instanceof Uint8Array);
     const isMakeJson = !isMakeBuf && args.format === 'make';
     if (isMakeBuf || isMakeJson) {
-      const { parseMakeBinary, parseMakeJson: parseMakeJsonFn } = await import('./parser/makeParser');
+      const { parseMakeBinary, parseMakeJsonToMakeDoc } = await import('./parser/makeParser');
       const makeDoc = isMakeBuf
         ? await parseMakeBinary(raw as Buffer)
-        : parseMakeJsonFn(raw);
+        : parseMakeJsonToMakeDoc(raw);
       const result = renderer.renderMake(makeDoc, { scale });
 
       if (format === 'html') {
