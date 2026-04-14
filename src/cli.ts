@@ -10,7 +10,8 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import { runPipeline, runMultiPagePipeline } from './pipeline/d2cPipeline';
+import { runPipeline, runMultiPagePipeline, runPipelineWithVerification } from './pipeline/d2cPipeline';
+import { formatVerificationReport, snapshotToJSON } from './pipeline/verify';
 import type { Platform } from './codegen/factory';
 import type { DesignFormat } from './parser';
 import { ClaudeProvider } from './ai/claudeProvider';
@@ -46,6 +47,10 @@ interface Args {
   renderScale?: number;
   // 多页面模式
   allPages?: boolean;
+  /** Run pipeline with stage-by-stage verification. */
+  verify?: boolean;
+  /** Directory to write per-stage snapshot JSON files. */
+  verifyDir?: string;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -125,6 +130,13 @@ function parseArgs(argv: string[]): Args {
         args.renderScale = parseFloat(s);
         break;
       }
+      case '--verify':
+        args.verify = true;
+        break;
+      case '--verify-dir':
+        args.verifyDir = next();
+        args.verify = true; // implies --verify
+        break;
       case '--verbose':
       case '-v':
         args.verbose = true;
@@ -176,6 +188,10 @@ Options:
       --all-pages                  Process all pages in the design (instead
                                  of only the first page). Generates one
                                  output per page plus a unified entry file.
+      --verify                     Run pipeline with stage-by-stage verification.
+                                 Prints a verification report to stderr.
+      --verify-dir <dir>           Write per-stage snapshot JSON files to <dir>.
+                                 Implies --verify.
       --render                     Render the design visually (SVG / HTML)
                                  instead of generating code. Implies
                                  --format sketch (or auto-detected).
@@ -513,9 +529,28 @@ async function main(): Promise<void> {
     return;
   }
 
-  const result = await runPipeline(raw, pipelineOpts);
+  // Choose verified or standard pipeline
+  const result = args.verify
+    ? await runPipelineWithVerification(raw, pipelineOpts)
+    : await runPipeline(raw, pipelineOpts);
   const { ir, generated, tokens, styleDictionary, tailwindPreset, diff } = result;
   void tokens; // tokens are exposed via styleDictionary
+
+  // Verification report
+  if (args.verify && 'verification' in result) {
+    const verification = (result as Awaited<ReturnType<typeof runPipelineWithVerification>>).verification;
+    console.error(formatVerificationReport(verification));
+
+    // Write per-stage snapshots
+    if (args.verifyDir) {
+      fs.mkdirSync(args.verifyDir, { recursive: true });
+      for (const snap of verification.snapshots) {
+        const filePath = path.join(args.verifyDir, `${snap.stage}.json`);
+        fs.writeFileSync(filePath, JSON.stringify(snapshotToJSON(snap), null, 2));
+      }
+      console.error(`d2c verify: wrote ${verification.snapshots.length} snapshot(s) → ${args.verifyDir}`);
+    }
+  }
 
   if (args.emitIR) {
     writeFile(args.emitIR, JSON.stringify(ir, null, 2));
