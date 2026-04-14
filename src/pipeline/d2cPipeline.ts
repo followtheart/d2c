@@ -24,6 +24,18 @@ import {
   diffIR,
   IRDiffEntry,
 } from '../diff/merge';
+import type { StageSnapshot, VerificationResult } from './verify';
+import {
+  verifyParse,
+  verifyLayout,
+  verifySemantics,
+  verifyComponentMatch,
+  verifyResponsive,
+  verifyProtectedMerge,
+  verifyTokens,
+  verifyCodegen,
+  buildVerificationResult,
+} from './verify';
 
 export interface PipelineOptions {
   format?: DesignFormat;
@@ -102,6 +114,146 @@ export async function runPipeline(
     styleDictionary,
     tailwindPreset,
     diff,
+  };
+}
+
+// ── Verified pipeline ──────────────────────────────────────────────────
+
+export interface VerifiedPipelineResult extends PipelineResult {
+  verification: VerificationResult;
+}
+
+function cloneIR(doc: IRDocument): IRDocument {
+  return JSON.parse(JSON.stringify(doc));
+}
+
+/**
+ * Runs the same pipeline as `runPipeline` but captures snapshots and runs
+ * validation checks at every stage.
+ */
+export async function runPipelineWithVerification(
+  rawInput: unknown,
+  opts: PipelineOptions,
+): Promise<VerifiedPipelineResult> {
+  const snapshots: StageSnapshot[] = [];
+
+  // [1] Parse
+  let t0 = Date.now();
+  log(opts.verbose, '[1/7] Parsing design file...');
+  const parsed = parseDesign(rawInput, opts.format ?? 'auto');
+  const parsedDoc: IRDocument = { ...parsed };
+  snapshots.push({
+    stage: 'parse',
+    durationMs: Date.now() - t0,
+    ir: cloneIR(parsedDoc),
+    checks: verifyParse(parsedDoc),
+  });
+
+  // [2] Layout inference
+  t0 = Date.now();
+  log(opts.verbose, '[2/7] Inferring layouts...');
+  const layoutTree = inferLayout(parsed.root);
+  const layoutDoc: IRDocument = { ...parsed, root: layoutTree };
+  snapshots.push({
+    stage: 'layout',
+    durationMs: Date.now() - t0,
+    ir: cloneIR(layoutDoc),
+    checks: verifyLayout(layoutDoc),
+  });
+
+  // [3] Semantic enhancement
+  t0 = Date.now();
+  log(opts.verbose, '[3/7] Semantic enhancement...');
+  let enhancedTree = await enhance(layoutTree, { llm: opts.llm });
+
+  if (opts.componentLibrary) {
+    log(opts.verbose, `[3.5/7] Matching ${opts.componentLibrary} components...`);
+    enhancedTree = matchComponents(enhancedTree, opts.componentLibrary);
+  }
+  let ir: IRDocument = { ...parsed, root: enhancedTree };
+  const semanticsDuration = Date.now() - t0;
+
+  snapshots.push({
+    stage: 'semantics',
+    durationMs: semanticsDuration,
+    ir: cloneIR(ir),
+    checks: verifySemantics(ir),
+  });
+
+  // [3.5] Component matching (report separately)
+  if (opts.componentLibrary) {
+    snapshots.push({
+      stage: 'componentMatch',
+      durationMs: 0, // included in semantics timing
+      ir: cloneIR(ir),
+      checks: verifyComponentMatch(ir),
+    });
+  }
+
+  // [4] Responsive inference
+  if (opts.responsiveVariants && opts.responsiveVariants.length) {
+    t0 = Date.now();
+    log(opts.verbose, '[4/7] Inferring responsive overrides...');
+    ir = inferResponsive(ir, opts.responsiveVariants);
+    snapshots.push({
+      stage: 'responsive',
+      durationMs: Date.now() - t0,
+      ir: cloneIR(ir),
+      checks: verifyResponsive(ir),
+    });
+  }
+
+  // [5] Protected merge
+  let diff: IRDiffEntry[] | undefined;
+  if (opts.previousIR) {
+    t0 = Date.now();
+    log(opts.verbose, '[5/7] Merging protected regions from previous IR...');
+    if (opts.computeDiff) diff = diffIR(opts.previousIR, ir);
+    ir = mergeProtectedRegions(opts.previousIR, ir);
+    snapshots.push({
+      stage: 'protectedMerge',
+      durationMs: Date.now() - t0,
+      ir: cloneIR(ir),
+      checks: verifyProtectedMerge(ir, opts.previousIR),
+    });
+  }
+
+  // [6] Token extraction
+  t0 = Date.now();
+  log(opts.verbose, '[6/7] Extracting design tokens...');
+  const tokens = extractTokens(ir);
+  const styleDictionary = toStyleDictionary(tokens);
+  const tailwindPreset = generateTailwindPreset(tokens);
+  snapshots.push({
+    stage: 'tokens',
+    durationMs: Date.now() - t0,
+    tokens,
+    checks: verifyTokens(tokens),
+  });
+
+  // [7] Code generation
+  t0 = Date.now();
+  log(opts.verbose, `[7/7] Generating ${opts.platform} code...`);
+  const generator = createGenerator(opts.platform);
+  const generated = generator.generate(ir);
+  snapshots.push({
+    stage: 'codegen',
+    durationMs: Date.now() - t0,
+    generated,
+    checks: verifyCodegen(generated, opts.platform),
+  });
+
+  log(opts.verbose, 'Done (with verification).');
+  const verification = buildVerificationResult(snapshots);
+
+  return {
+    ir,
+    generated,
+    tokens,
+    styleDictionary,
+    tailwindPreset,
+    diff,
+    verification,
   };
 }
 

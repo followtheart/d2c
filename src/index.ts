@@ -35,8 +35,28 @@ export {
 export type { TailwindTokenLookup } from './tokens/tailwindPreset';
 export { diffIR, mergeProtectedRegions, formatDiff } from './diff/merge';
 export type { IRDiffEntry } from './diff/merge';
-export { runPipeline, runMultiPagePipeline } from './pipeline/d2cPipeline';
-export type { PipelineOptions, PipelineResult, MultiPagePipelineResult } from './pipeline/d2cPipeline';
+export { runPipeline, runMultiPagePipeline, runPipelineWithVerification } from './pipeline/d2cPipeline';
+export type { PipelineOptions, PipelineResult, MultiPagePipelineResult, VerifiedPipelineResult } from './pipeline/d2cPipeline';
+export {
+  verifyParse,
+  verifyLayout,
+  verifySemantics,
+  verifyComponentMatch,
+  verifyResponsive,
+  verifyProtectedMerge,
+  verifyTokens,
+  verifyCodegen,
+  buildVerificationResult,
+  formatVerificationReport,
+  snapshotToJSON,
+} from './pipeline/verify';
+export type {
+  StageName,
+  CheckLevel,
+  Check,
+  StageSnapshot,
+  VerificationResult,
+} from './pipeline/verify';
 export { loadConfig, resolveApiKey } from './config';
 export type { D2CConfig } from './config';
 export {
