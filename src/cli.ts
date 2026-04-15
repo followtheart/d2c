@@ -62,7 +62,7 @@ interface Args {
   /** Output path for comparison report (default: <render-output>/report.md). */
   compareReport?: string;
   /** Vision provider backend: openrouter | anthropic (default: openrouter). */
-  visionProvider?: 'openrouter' | 'anthropic' | 'zhipuai';
+  visionProvider?: 'openrouter' | 'anthropic' | 'zhipuai' | 'dashscope';
   /** Vision model id override. */
   visionModel?: string;
 }
@@ -167,7 +167,7 @@ function parseArgs(argv: string[]): Args {
         args.compareReport = next();
         break;
       case '--vision-provider':
-        args.visionProvider = next() as 'openrouter' | 'anthropic' | 'zhipuai';
+        args.visionProvider = next() as 'openrouter' | 'anthropic' | 'zhipuai' | 'dashscope';
         break;
       case '--vision-model':
         args.visionModel = next();
@@ -212,9 +212,11 @@ Options:
       --llm-provider <name>      Use @node-llm/core as the semantic LLM
                                  provider. Supports: openai | anthropic |
                                  gemini | deepseek | openrouter | ollama |
-                                 mistral | xai | bedrock | zhipuai. The
+                                 mistral | xai | bedrock | zhipuai |
+                                 siliconflow. The
                                  matching API key env var (e.g.
-                                 OPENROUTER_API_KEY, ZHIPUAI_API_KEY) is
+                                 OPENROUTER_API_KEY, ZHIPUAI_API_KEY,
+                                 SILICONFLOW_API_KEY) is
                                  read automatically.
                                  Requires "npm install @node-llm/core".
       --llm-model <id>           Model id passed to --llm-provider
@@ -242,7 +244,7 @@ Options:
       --compare-report <file>      Output path for comparison report
                                  (default: <render-output>/report.md).
       --vision-provider <name>     Vision backend: openrouter | anthropic
-                                 | zhipuai (default: openrouter).
+                                 | zhipuai | dashscope (default: openrouter).
       --vision-model <id>          Override the vision model id.
       --render                     Render the design visually (SVG / HTML)
                                  instead of generating code. Implies
@@ -818,6 +820,10 @@ function apiKeyEnvVarFor(provider: NodeLlmProviderName): string {
       return 'BEDROCK_API_KEY';
     case 'zhipuai':
       return 'ZHIPUAI_API_KEY';
+    case 'siliconflow':
+      return 'SILICONFLOW_API_KEY';
+    case 'dashscope':
+      return 'DASHSCOPE_API_KEY';
     case 'ollama':
       return '';
   }

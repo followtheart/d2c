@@ -91,6 +91,12 @@ interface SketchStyle {
   };
 }
 
+interface SketchOverrideValue {
+  _class: 'overrideValue';
+  overrideName: string;
+  value: string;
+}
+
 interface SketchLayer {
   _class: string;
   do_objectID?: string;
@@ -99,11 +105,16 @@ interface SketchLayer {
   frame?: SketchFrame;
   style?: SketchStyle;
   fixedRadius?: number;
+  cornerRadius?: number;
   stringValue?: string; // for text
-  attributedString?: { string?: string };
+  attributedString?: { string?: string; attributes?: Array<{ _class: string; attributes?: Record<string, unknown>; length?: number; location?: number }> };
   layers?: SketchLayer[];
   rotation?: number;
   isVisible?: boolean;
+  symbolID?: string;
+  overrideValues?: SketchOverrideValue[];
+  backgroundColor?: SketchColor;
+  hasBackgroundColor?: boolean;
 }
 
 interface SketchPage extends SketchLayer {
@@ -123,10 +134,18 @@ function sketchColor(c: SketchColor | undefined): string | undefined {
 
 function extractStyle(layer: SketchLayer): Style {
   const style: Style = {};
-  const fill = (layer.style?.fills ?? []).find((f) => f.isEnabled !== false);
+  const fills = (layer.style?.fills ?? []).filter((f) => f.isEnabled !== false);
+  const fill = fills[0];
   if (fill?.fillType === 0 || fill?.fillType === undefined) {
     const c = sketchColor(fill?.color);
     if (c) style.backgroundColor = c;
+  } else if (fill?.fillType === 4) {
+    // image fill — check if there's a solid color overlay (common pattern)
+    const solidOverlay = fills.find((f) => f.fillType === 0 && f.isEnabled !== false);
+    if (solidOverlay?.color) {
+      const c = sketchColor(solidOverlay.color);
+      if (c) style.backgroundColor = c;
+    }
   } else if (fill?.fillType === 1 && fill.gradient) {
     const g = fill.gradient;
     const stops = (g.stops ?? []).map((s: any) => {
@@ -166,10 +185,43 @@ function extractStyle(layer: SketchLayer): Style {
       color: sketchColor(s.color) ?? '#00000033',
     }));
   }
-  if (layer.fixedRadius !== undefined) style.borderRadius = layer.fixedRadius;
+  if (layer.fixedRadius !== undefined && layer.fixedRadius > 0) {
+    style.borderRadius = layer.fixedRadius;
+  } else if (layer.cornerRadius !== undefined && layer.cornerRadius > 0) {
+    style.borderRadius = layer.cornerRadius;
+  }
+  // artboard background color
+  if (layer.hasBackgroundColor && layer.backgroundColor) {
+    if (!style.backgroundColor) {
+      const c = sketchColor(layer.backgroundColor);
+      if (c) style.backgroundColor = c;
+    }
+  }
   const opacity = layer.style?.contextSettings?.opacity;
   if (opacity !== undefined && opacity < 1) style.opacity = opacity;
   return style;
+}
+
+// 为没有显式填充的 symbolInstance 推断默认样式
+function inferSymbolStyle(layer: SketchLayer, style: Style): void {
+  if (layer._class !== 'symbolInstance') return;
+  const n = (layer.name ?? '').toLowerCase();
+  // Modal/Dialog — 通常是白色背景带圆角
+  if (n.includes('modal') || n.includes('dialog') || n.includes('card') || n.includes('sheet')) {
+    if (!style.backgroundColor) style.backgroundColor = '#ffffff';
+    if (!style.borderRadius) style.borderRadius = 16;
+  }
+  // Button — 需要可见的背景色（排除纯图标按钮如 "Button/Icon"）
+  if (n.includes('button') && !(n === 'button/icon' || n.endsWith('/icon'))) {
+    if (!style.backgroundColor) style.backgroundColor = '#6c5ce7';
+    if (!style.borderRadius) style.borderRadius = 8;
+  }
+  // Field/Input — 底部边框
+  if (n.includes('field') || n.includes('input') || n.includes('text field')) {
+    if (!style.border) {
+      style.border = { width: 1, color: '#e0e0e0', style: 'solid' };
+    }
+  }
 }
 
 function extractTextStyle(layer: SketchLayer): TextStyle | undefined {
@@ -204,16 +256,64 @@ function mapType(layer: SketchLayer): IRNodeType {
       return 'text';
     case 'bitmap':
       return 'image';
+    case 'symbolInstance': {
+      const n = (layer.name ?? '').toLowerCase();
+      if (n.includes('button')) return 'button';
+      if (n.includes('field') || n.includes('input') || n.includes('text field'))
+        return 'input';
+      return 'container';
+    }
     case 'artboard':
     case 'group':
     case 'shapeGroup':
-    case 'symbolInstance':
     case 'rectangle':
     case 'oval':
       return 'container';
     default:
       return 'container';
   }
+}
+
+// 从 symbolInstance 的 overrideValues 中提取文字内容
+function extractOverrideTexts(layer: SketchLayer): string[] {
+  if (layer._class !== 'symbolInstance' || !layer.overrideValues) return [];
+  const texts: string[] = [];
+  for (const ov of layer.overrideValues) {
+    if (ov.overrideName.endsWith('_stringValue') && ov.value && typeof ov.value === 'string') {
+      texts.push(ov.value);
+    }
+  }
+  return texts;
+}
+
+// 为 symbolInstance 生成虚拟子节点
+function synthesizeSymbolChildren(layer: SketchLayer): IRNode[] {
+  const texts = extractOverrideTexts(layer);
+  if (texts.length === 0) return [];
+  const frame = layer.frame ?? { x: 0, y: 0, width: 0, height: 0 };
+  const children: IRNode[] = [];
+  const lineH = Math.min(24, Math.floor(frame.height / (texts.length + 1)));
+  let yOff = Math.max(0, Math.floor((frame.height - texts.length * lineH) / 2));
+  for (let i = 0; i < texts.length; i++) {
+    const isLabel = i === 0 && texts.length > 1;
+    children.push({
+      id: `${layer.do_objectID ?? 'sym'}_ov_${i}`,
+      name: texts[i],
+      type: 'text',
+      box: { x: 0, y: yOff, width: frame.width, height: lineH },
+      layout: { type: 'absolute' },
+      style: {},
+      textStyle: {
+        content: texts[i],
+        fontSize: isLabel ? 12 : 14,
+        fontWeight: isLabel ? 600 : 400,
+        color: isLabel ? '#8f92a1' : '#1e1f20',
+      },
+      children: [],
+    });
+    yOff += lineH;
+  }
+  return children;
 }
 
 function toIRNode(layer: SketchLayer): IRNode {
@@ -224,6 +324,15 @@ function toIRNode(layer: SketchLayer): IRNode {
     width: frame.width,
     height: frame.height,
   };
+
+  // 对 symbolInstance 合成子节点
+  const realChildren = (layer.layers ?? [])
+    .filter((l) => l.isVisible !== false)
+    .map((l) => toIRNode(l));
+  const synthChildren = layer._class === 'symbolInstance' ? synthesizeSymbolChildren(layer) : [];
+  const merged = realChildren.length > 0 ? realChildren : synthChildren;
+  // 按 y 坐标排序，保证视觉顺序从上到下
+  const allChildren = merged.slice().sort((a, b) => a.box.y - b.box.y);
 
   const node: IRNode = {
     id:
@@ -236,10 +345,37 @@ function toIRNode(layer: SketchLayer): IRNode {
     layout: { type: 'absolute' },
     style: extractStyle(layer),
     textStyle: extractTextStyle(layer),
-    children: (layer.layers ?? [])
-      .filter((l) => l.isVisible !== false)
-      .map((l) => toIRNode(l)),
+    children: allChildren,
   };
+
+  // 为 symbolInstance 推断默认视觉样式
+  inferSymbolStyle(layer, node.style);
+
+  // 对 symbolInstance 设置语义信息
+  if (layer._class === 'symbolInstance') {
+    const texts = extractOverrideTexts(layer);
+    if (texts.length > 0) {
+      // button 没有子节点时生成一个文字子节点
+      if (node.type === 'button' && allChildren.length === 0) {
+        const mainText = texts[texts.length - 1];
+        node.children = [{
+          id: `${node.id}_btn_text`,
+          name: mainText,
+          type: 'text',
+          box: { x: 0, y: 0, width: frame.width, height: frame.height },
+          layout: { type: 'absolute' },
+          style: {},
+          textStyle: { content: mainText, fontSize: 16, fontWeight: 600, color: '#ffffff' },
+          children: [],
+        }];
+      }
+      // input 始终设置 ariaLabel（无论有无子节点）
+      if (node.type === 'input') {
+        node.semantics = { ariaLabel: texts[0] };
+      }
+    }
+  }
+
   return node;
 }
 

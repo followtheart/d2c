@@ -23,7 +23,9 @@ type ProviderName =
   | 'mistral'
   | 'xai'
   | 'bedrock'
-  | 'zhipuai';
+  | 'zhipuai'
+  | 'siliconflow'
+  | 'dashscope';
 
 export interface D2CConfig {
   apiKeys?: Partial<Record<ProviderName, string>>;

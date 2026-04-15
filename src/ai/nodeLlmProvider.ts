@@ -44,7 +44,9 @@ export type NodeLlmProviderName =
   | 'mistral'
   | 'xai'
   | 'bedrock'
-  | 'zhipuai';
+  | 'zhipuai'
+  | 'siliconflow'
+  | 'dashscope';
 
 export interface NodeLlmProviderConfig {
   /** Which underlying provider @node-llm/core should route through. */
@@ -92,6 +94,46 @@ const DEFAULT_MODELS: Record<NodeLlmProviderName, string> = {
   xai: 'grok-2-latest',
   bedrock: 'anthropic.claude-3-5-sonnet-20240620-v1:0',
   zhipuai: 'glm-5-turbo',
+  siliconflow: 'Qwen/Qwen2.5-7B-Instruct',
+  dashscope: 'qwen3.6-plus',
+};
+
+const DIRECT_OPENAI_COMPATIBLE_PROVIDERS = new Set<NodeLlmProviderName>([
+  'siliconflow',
+]);
+
+const DEFAULT_REQUEST_TIMEOUT_MS: Record<NodeLlmProviderName, number> = {
+  openai: 60_000,
+  anthropic: 60_000,
+  gemini: 60_000,
+  deepseek: 60_000,
+  openrouter: 60_000,
+  ollama: 60_000,
+  mistral: 60_000,
+  xai: 60_000,
+  bedrock: 60_000,
+  zhipuai: 60_000,
+  siliconflow: 120_000,
+  dashscope: 60_000,
+};
+
+const DEFAULT_MAX_TOKENS: Record<NodeLlmProviderName, number> = {
+  openai: 4096,
+  anthropic: 4096,
+  gemini: 4096,
+  deepseek: 4096,
+  openrouter: 4096,
+  ollama: 4096,
+  mistral: 4096,
+  xai: 4096,
+  bedrock: 4096,
+  zhipuai: 4096,
+  siliconflow: 1024,
+  dashscope: 4096,
+};
+
+const DIRECT_PROVIDER_MAX_RETRIES: Partial<Record<NodeLlmProviderName, number>> = {
+  siliconflow: 2,
 };
 
 /**
@@ -132,6 +174,8 @@ const API_KEY_FIELDS: Record<NodeLlmProviderName, string | null> = {
   xai: 'xaiApiKey',
   bedrock: 'bedrockApiKey',
   zhipuai: 'zhipuaiApiKey',
+  siliconflow: 'openaiApiKey',
+  dashscope: 'openaiApiKey',
 };
 
 /**
@@ -148,7 +192,65 @@ const API_BASE_FIELDS: Record<NodeLlmProviderName, string> = {
   xai: 'xaiApiBase',
   bedrock: 'bedrockApiBase',
   zhipuai: 'zhipuaiApiBase',
+  siliconflow: 'openaiApiBase',
+  dashscope: 'openaiApiBase',
 };
+
+interface RuntimeProviderConfig {
+  effectiveProvider: Exclude<NodeLlmProviderName, 'zhipuai' | 'siliconflow' | 'dashscope'> | 'openai';
+  clientConfig: Record<string, unknown>;
+}
+
+export function resolveNodeLlmRuntimeConfig(
+  config: NodeLlmProviderConfig,
+): RuntimeProviderConfig {
+  const isOpenAiCompatibleAlias =
+    config.provider === 'zhipuai' || config.provider === 'siliconflow' || config.provider === 'dashscope';
+  const effectiveProvider: RuntimeProviderConfig['effectiveProvider'] =
+    isOpenAiCompatibleAlias
+      ? 'openai'
+      : (config.provider as Exclude<NodeLlmProviderName, 'zhipuai' | 'siliconflow' | 'dashscope'>);
+
+  const clientConfig: Record<string, unknown> = {
+    provider: effectiveProvider,
+  };
+
+  if (config.provider === 'zhipuai') {
+    if (config.apiKey) {
+      clientConfig['openaiApiKey'] = config.apiKey;
+    }
+    clientConfig['openaiApiBase'] =
+      config.baseUrl ?? 'https://open.bigmodel.cn/api/paas/v4';
+    return { effectiveProvider, clientConfig };
+  }
+
+  if (config.provider === 'siliconflow') {
+    if (config.apiKey) {
+      clientConfig['openaiApiKey'] = config.apiKey;
+    }
+    clientConfig['openaiApiBase'] =
+      config.baseUrl ?? 'https://api.siliconflow.cn/v1';
+    return { effectiveProvider, clientConfig };
+  }
+
+  if (config.provider === 'dashscope') {
+    if (config.apiKey) {
+      clientConfig['openaiApiKey'] = config.apiKey;
+    }
+    clientConfig['openaiApiBase'] =
+      config.baseUrl ?? 'https://dashscope.aliyuncs.com/compatible-mode/v1';
+    return { effectiveProvider, clientConfig };
+  }
+
+  const keyField = API_KEY_FIELDS[config.provider];
+  if (keyField && config.apiKey) {
+    clientConfig[keyField] = config.apiKey;
+  }
+  if (config.baseUrl) {
+    clientConfig[API_BASE_FIELDS[config.provider]] = config.baseUrl;
+  }
+  return { effectiveProvider, clientConfig };
+}
 
 export class NodeLlmProvider implements LLMProvider {
   private llmPromise?: Promise<NodeLlmCoreModule['createLLM'] extends (
@@ -189,34 +291,14 @@ export class NodeLlmProvider implements LLMProvider {
           );
         }
 
-        const isZhipuai = this.config.provider === 'zhipuai';
-        const effectiveProvider = isZhipuai ? 'openai' : this.config.provider;
-
-        const cfg: Record<string, unknown> = {
-          provider: effectiveProvider,
-        };
-        if (isZhipuai) {
-          if (this.config.apiKey) {
-            cfg['openaiApiKey'] = this.config.apiKey;
-          }
-          cfg['openaiApiBase'] = this.config.baseUrl ?? 'https://open.bigmodel.cn/api/paas/v4';
-        } else {
-          const keyField = API_KEY_FIELDS[this.config.provider];
-          if (keyField && this.config.apiKey) {
-            cfg[keyField] = this.config.apiKey;
-          }
-          if (this.config.baseUrl) {
-            cfg[API_BASE_FIELDS[this.config.provider]] = this.config.baseUrl;
-          }
-        }
-        return mod.createLLM(cfg);
+          const runtimeConfig = resolveNodeLlmRuntimeConfig(this.config);
+          return mod.createLLM(runtimeConfig.clientConfig);
       })();
     }
     return this.llmPromise;
   }
 
   async annotate(tree: IRNode): Promise<Record<string, Semantics>> {
-    const llm = await this.getLLM();
     const model = this.config.model ?? DEFAULT_MODELS[this.config.provider];
 
     const userPrompt =
@@ -225,16 +307,23 @@ export class NodeLlmProvider implements LLMProvider {
 
     let responseText: string;
     try {
-      const chat = llm
-        .chat(model)
-        .withSystemPrompt(SYSTEM_PROMPT)
-        .withTemperature(this.config.temperature ?? 0);
-      const res = await chat.ask(userPrompt, {
-        maxTokens: this.config.maxTokens ?? 4096,
-        requestTimeout: this.config.requestTimeout ?? 60_000,
-      });
-      // ChatResponseString extends String — `.toString()` always works.
-      responseText = res?.content ?? res?.toString() ?? '';
+      if (DIRECT_OPENAI_COMPATIBLE_PROVIDERS.has(this.config.provider)) {
+        responseText = await this.callDirectOpenAiCompatible(model, userPrompt);
+      } else {
+        const llm = await this.getLLM();
+        const chat = llm
+          .chat(model)
+          .withSystemPrompt(SYSTEM_PROMPT)
+          .withTemperature(this.config.temperature ?? 0);
+        const res = await chat.ask(userPrompt, {
+          maxTokens: this.config.maxTokens ?? DEFAULT_MAX_TOKENS[this.config.provider],
+          requestTimeout:
+            this.config.requestTimeout ??
+            DEFAULT_REQUEST_TIMEOUT_MS[this.config.provider],
+        });
+        // ChatResponseString extends String — `.toString()` always works.
+        responseText = res?.content ?? res?.toString() ?? '';
+      }
     } catch (e) {
       throw new Error(
         `NodeLlmProvider (${this.config.provider}/${model}) request failed: ${
@@ -249,6 +338,100 @@ export class NodeLlmProvider implements LLMProvider {
       return {};
     }
   }
+
+  private async callDirectOpenAiCompatible(
+    model: string,
+    userPrompt: string,
+  ): Promise<string> {
+    const runtimeConfig = resolveNodeLlmRuntimeConfig(this.config);
+    const baseUrl = String(runtimeConfig.clientConfig.openaiApiBase ?? '');
+    const apiKey = String(runtimeConfig.clientConfig.openaiApiKey ?? '');
+    if (!baseUrl || !apiKey) {
+      throw new Error(
+        `Missing OpenAI-compatible runtime config for ${this.config.provider}`,
+      );
+    }
+
+    const timeoutMs =
+      this.config.requestTimeout ??
+      DEFAULT_REQUEST_TIMEOUT_MS[this.config.provider];
+    const maxRetries = DIRECT_PROVIDER_MAX_RETRIES[this.config.provider] ?? 0;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const res = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            temperature: this.config.temperature ?? 0,
+            max_tokens:
+              this.config.maxTokens ?? DEFAULT_MAX_TOKENS[this.config.provider],
+            messages: [
+              { role: 'system', content: SYSTEM_PROMPT },
+              { role: 'user', content: userPrompt },
+            ],
+          }),
+          signal: controller.signal,
+        });
+
+        if (!res.ok) {
+          const text = await res.text();
+          if (attempt < maxRetries && isRetryableStatus(res.status)) {
+            await delay(backoffMs(attempt));
+            continue;
+          }
+          throw new Error(`HTTP ${res.status}: ${text}`);
+        }
+
+        const json = (await res.json()) as {
+          choices?: Array<{
+            message?: { content?: string };
+          }>;
+        };
+        return json.choices?.[0]?.message?.content ?? '';
+      } catch (e) {
+        if ((e as Error).name === 'AbortError') {
+          if (attempt < maxRetries) {
+            await delay(backoffMs(attempt));
+            continue;
+          }
+          throw new Error(`Request timeout after ${timeoutMs}ms`);
+        }
+        if (attempt < maxRetries && isRetryableError(e)) {
+          await delay(backoffMs(attempt));
+          continue;
+        }
+        throw e;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    throw new Error(`Request timeout after ${timeoutMs}ms`);
+  }
+}
+
+function isRetryableStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500;
+}
+
+function isRetryableError(error: unknown): boolean {
+  const message = (error as Error)?.message ?? '';
+  return /timeout|econnreset|socket hang up|temporarily unavailable/i.test(message);
+}
+
+function backoffMs(attempt: number): number {
+  return 1000 * Math.pow(2, attempt);
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function extractJson(s: string): string {

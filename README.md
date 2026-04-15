@@ -124,7 +124,8 @@ DEEPSEEK_API_KEY=sk-... node dist/cli.js \
       --llm-provider <name>      Use @node-llm/core as the semantic LLM
                                  provider. Supports: openai | anthropic |
                                  gemini | deepseek | openrouter | ollama |
-                                 mistral | xai | bedrock
+                                 mistral | xai | bedrock | zhipuai |
+                                 siliconflow
       --llm-model <id>           Model id for --llm-provider
       --llm-base-url <url>       Override base URL (gateways / Ollama)
       --all-pages                Process all pages in the design
@@ -216,14 +217,15 @@ d2c 会按以下顺序查找配置文件（找到第一个即停止）：
     "openrouter": "sk-or-xxxxx",
     "deepseek": "sk-xxxxx",
     "openai": "sk-xxxxx",
+    "siliconflow": "sk-xxxxx",
     "gemini": "AIza-xxxxx",
     "mistral": "xxxxx",
     "xai": "xxxxx",
     "bedrock": "xxxxx"
   },
   "llm": {
-    "provider": "openrouter",
-    "model": "anthropic/claude-3.5-sonnet",
+    "provider": "siliconflow",
+    "model": "Pro/moonshotai/Kimi-K2.5",
     "baseUrl": "https://custom-gateway.example.com/v1"
   }
 }
@@ -235,6 +237,8 @@ d2c 会按以下顺序查找配置文件（找到第一个即停止）：
 | `llm.provider` | 默认 LLM 供应商（可被 `--llm-provider` 覆盖） |
 | `llm.model` | 默认模型 id（可被 `--llm-model` 覆盖） |
 | `llm.baseUrl` | 默认端点 URL（可被 `--llm-base-url` 覆盖） |
+
+> `siliconflow` 按 OpenAI 兼容接口接入；未显式指定 `llm.baseUrl` 时默认使用 `https://api.siliconflow.cn/v1`。
 
 配置完成后，只需运行：
 
@@ -472,12 +476,10 @@ node dist/cli.js --render-snapshots snapshots/ --snapshot-format png --render-ou
 
 ```bash
 # OpenRouter（默认使用 gpt-4o）
-OPENROUTER_API_KEY=sk-or-xxx node dist/cli.js --compare-stages \
-    --render-output img/ --compare-report report.md
+OPENROUTER_API_KEY=sk-or-xxx node dist/cli.js --compare-stages --render-output img/ --compare-report report.md
 
 # Anthropic（默认使用 claude-sonnet-4-20250514）
-ANTHROPIC_API_KEY=sk-ant-xxx node dist/cli.js --compare-stages \
-    --render-output img/ --vision-provider anthropic
+ANTHROPIC_API_KEY=sk-ant-xxx node dist/cli.js --compare-stages --render-output img/ --vision-provider anthropic
 ```
 
 比对引擎会：
