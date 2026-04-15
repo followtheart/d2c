@@ -223,7 +223,7 @@ test('formatVerificationReport: produces readable output', async () => {
 
 // ── snapshotToJSON ──────────────────────────────────────────────────
 
-test('snapshotToJSON: codegen snapshot truncates content', async () => {
+test('snapshotToJSON: codegen snapshot includes full content', async () => {
   const raw = loadExample('sample-design.json');
   const result = await runPipelineWithVerification(raw, { platform: 'react' });
   const codegenSnap = result.verification.snapshots.find((s) => s.stage === 'codegen');
@@ -231,10 +231,12 @@ test('snapshotToJSON: codegen snapshot truncates content', async () => {
 
   const json = snapshotToJSON(codegenSnap!) as Record<string, unknown>;
   assert.equal(json.stage, 'codegen');
-  const gen = json.generated as { files: Array<{ path: string; size: number; preview: string }> };
+  const gen = json.generated as { files: Array<{ path: string; size: number; content: string; preview: string }> };
   assert.ok(gen.files.length > 0);
   assert.ok(typeof gen.files[0].size === 'number');
+  assert.ok(typeof gen.files[0].content === 'string');
   assert.ok(typeof gen.files[0].preview === 'string');
+  assert.equal(gen.files[0].content.length, gen.files[0].size);
 });
 
 // ── Multi-platform verification ─────────────────────────────────────

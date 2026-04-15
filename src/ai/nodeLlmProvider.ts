@@ -43,7 +43,8 @@ export type NodeLlmProviderName =
   | 'ollama'
   | 'mistral'
   | 'xai'
-  | 'bedrock';
+  | 'bedrock'
+  | 'zhipuai';
 
 export interface NodeLlmProviderConfig {
   /** Which underlying provider @node-llm/core should route through. */
@@ -90,6 +91,7 @@ const DEFAULT_MODELS: Record<NodeLlmProviderName, string> = {
   mistral: 'mistral-small-latest',
   xai: 'grok-2-latest',
   bedrock: 'anthropic.claude-3-5-sonnet-20240620-v1:0',
+  zhipuai: 'glm-5-turbo',
 };
 
 /**
@@ -129,6 +131,7 @@ const API_KEY_FIELDS: Record<NodeLlmProviderName, string | null> = {
   mistral: 'mistralApiKey',
   xai: 'xaiApiKey',
   bedrock: 'bedrockApiKey',
+  zhipuai: 'zhipuaiApiKey',
 };
 
 /**
@@ -144,6 +147,7 @@ const API_BASE_FIELDS: Record<NodeLlmProviderName, string> = {
   mistral: 'mistralApiBase',
   xai: 'xaiApiBase',
   bedrock: 'bedrockApiBase',
+  zhipuai: 'zhipuaiApiBase',
 };
 
 export class NodeLlmProvider implements LLMProvider {
@@ -185,15 +189,25 @@ export class NodeLlmProvider implements LLMProvider {
           );
         }
 
+        const isZhipuai = this.config.provider === 'zhipuai';
+        const effectiveProvider = isZhipuai ? 'openai' : this.config.provider;
+
         const cfg: Record<string, unknown> = {
-          provider: this.config.provider,
+          provider: effectiveProvider,
         };
-        const keyField = API_KEY_FIELDS[this.config.provider];
-        if (keyField && this.config.apiKey) {
-          cfg[keyField] = this.config.apiKey;
-        }
-        if (this.config.baseUrl) {
-          cfg[API_BASE_FIELDS[this.config.provider]] = this.config.baseUrl;
+        if (isZhipuai) {
+          if (this.config.apiKey) {
+            cfg['openaiApiKey'] = this.config.apiKey;
+          }
+          cfg['openaiApiBase'] = this.config.baseUrl ?? 'https://open.bigmodel.cn/api/paas/v4';
+        } else {
+          const keyField = API_KEY_FIELDS[this.config.provider];
+          if (keyField && this.config.apiKey) {
+            cfg[keyField] = this.config.apiKey;
+          }
+          if (this.config.baseUrl) {
+            cfg[API_BASE_FIELDS[this.config.provider]] = this.config.baseUrl;
+          }
         }
         return mod.createLLM(cfg);
       })();

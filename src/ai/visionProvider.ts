@@ -18,7 +18,7 @@
 
 // ── Types ─────────────────────────────────────────────────────────────
 
-export type VisionBackend = 'openrouter' | 'anthropic';
+export type VisionBackend = 'openrouter' | 'anthropic' | 'zhipuai';
 
 export interface VisionProviderConfig {
   provider: VisionBackend;
@@ -47,11 +47,13 @@ export interface StageAnalysis {
 const DEFAULT_MODELS: Record<VisionBackend, string> = {
   openrouter: 'openai/gpt-4o',
   anthropic: 'claude-sonnet-4-20250514',
+  zhipuai: 'glm-5v-turbo',
 };
 
 const DEFAULT_ENDPOINTS: Record<VisionBackend, string> = {
   openrouter: 'https://openrouter.ai/api/v1/chat/completions',
   anthropic: 'https://api.anthropic.com/v1/messages',
+  zhipuai: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
 };
 
 // ── VisionProvider ────────────────────────────────────────────────────

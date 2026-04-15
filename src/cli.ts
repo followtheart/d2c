@@ -62,7 +62,7 @@ interface Args {
   /** Output path for comparison report (default: <render-output>/report.md). */
   compareReport?: string;
   /** Vision provider backend: openrouter | anthropic (default: openrouter). */
-  visionProvider?: 'openrouter' | 'anthropic';
+  visionProvider?: 'openrouter' | 'anthropic' | 'zhipuai';
   /** Vision model id override. */
   visionModel?: string;
 }
@@ -167,7 +167,7 @@ function parseArgs(argv: string[]): Args {
         args.compareReport = next();
         break;
       case '--vision-provider':
-        args.visionProvider = next() as 'openrouter' | 'anthropic';
+        args.visionProvider = next() as 'openrouter' | 'anthropic' | 'zhipuai';
         break;
       case '--vision-model':
         args.visionModel = next();
@@ -212,9 +212,10 @@ Options:
       --llm-provider <name>      Use @node-llm/core as the semantic LLM
                                  provider. Supports: openai | anthropic |
                                  gemini | deepseek | openrouter | ollama |
-                                 mistral | xai | bedrock. The matching API
-                                 key env var (e.g. OPENROUTER_API_KEY,
-                                 DEEPSEEK_API_KEY) is read automatically.
+                                 mistral | xai | bedrock | zhipuai. The
+                                 matching API key env var (e.g.
+                                 OPENROUTER_API_KEY, ZHIPUAI_API_KEY) is
+                                 read automatically.
                                  Requires "npm install @node-llm/core".
       --llm-model <id>           Model id passed to --llm-provider
                                  (e.g. deepseek-chat, openai/gpt-4o-mini)
@@ -241,7 +242,7 @@ Options:
       --compare-report <file>      Output path for comparison report
                                  (default: <render-output>/report.md).
       --vision-provider <name>     Vision backend: openrouter | anthropic
-                                 (default: openrouter).
+                                 | zhipuai (default: openrouter).
       --vision-model <id>          Override the vision model id.
       --render                     Render the design visually (SVG / HTML)
                                  instead of generating code. Implies
@@ -349,15 +350,14 @@ async function compareStagesCommand(args: Args): Promise<void> {
     process.exit(2);
   }
 
+  const config = loadConfig();
   const visionBackend = args.visionProvider ?? 'openrouter';
-  const apiKey = visionBackend === 'anthropic'
-    ? process.env.ANTHROPIC_API_KEY
-    : process.env.OPENROUTER_API_KEY;
+  const envVar = apiKeyEnvVarFor(visionBackend);
+  const apiKey = resolveApiKey(visionBackend, envVar, config);
 
   if (!apiKey) {
-    const envVar = visionBackend === 'anthropic' ? 'ANTHROPIC_API_KEY' : 'OPENROUTER_API_KEY';
     console.error(
-      `ERROR: --compare-stages with --vision-provider ${visionBackend} requires ${envVar} env var.`,
+      `ERROR: --compare-stages with --vision-provider ${visionBackend} requires ${envVar} env var or apiKeys.${visionBackend} in .d2crc.json.`,
     );
     process.exit(2);
   }
@@ -816,6 +816,8 @@ function apiKeyEnvVarFor(provider: NodeLlmProviderName): string {
       return 'XAI_API_KEY';
     case 'bedrock':
       return 'BEDROCK_API_KEY';
+    case 'zhipuai':
+      return 'ZHIPUAI_API_KEY';
     case 'ollama':
       return '';
   }

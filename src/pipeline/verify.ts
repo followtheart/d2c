@@ -653,8 +653,8 @@ export function formatVerificationReport(result: VerificationResult): string {
 
 /**
  * Serialize a stage snapshot to a JSON-safe object for writing to disk.
- * The IR is included in full; generated file contents are truncated for
- * readability in large projects.
+ * The IR is included in full; generated file contents are stored in full
+ * with a short preview for quick inspection.
  */
 export function snapshotToJSON(snap: StageSnapshot): Record<string, unknown> {
   return {
@@ -670,6 +670,7 @@ export function snapshotToJSON(snap: StageSnapshot): Record<string, unknown> {
             files: snap.generated.files.map((f) => ({
               path: f.path,
               size: f.content.length,
+              content: f.content,
               preview: f.content.slice(0, 500) + (f.content.length > 500 ? '...' : ''),
             })),
           },
