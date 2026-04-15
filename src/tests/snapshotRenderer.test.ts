@@ -29,7 +29,7 @@ test('parseRenderer: produces valid HTML from parse snapshot', () => {
   const html = parseRenderer.render(snap);
   assert.ok(html.includes('<!DOCTYPE html>'), 'should be a full HTML page');
   assert.ok(html.includes('parse'), 'should contain stage name');
-  assert.ok(html.includes('LoginScreen'), 'should contain document name');
+  assert.ok(html.includes('UserCard'), 'should contain document name');
   assert.ok(html.includes('parse-node'), 'should contain wireframe nodes');
   assert.ok(html.includes('Parse summary'), 'should contain stats panel');
 });

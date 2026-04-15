@@ -19,7 +19,8 @@
 import type { IRNode, Layout, Box, AlignValue, JustifyValue } from '../ir/types';
 import { map } from '../utils/tree';
 
-const EPS = 2; // pixel tolerance
+const EPS = 4; // pixel tolerance
+const OVERLAP_RATIO = 0.2; // overlap must be > 20% of smaller element to be significant
 
 function numOr(n: number | 'auto' | 'fill', fallback: number): number {
   return typeof n === 'number' ? n : fallback;
@@ -34,13 +35,24 @@ function bounds(box: Box): { x1: number; y1: number; x2: number; y2: number } {
 function overlapsY(a: IRNode, b: IRNode): boolean {
   const ab = bounds(a.box);
   const bb = bounds(b.box);
-  return Math.min(ab.y2, bb.y2) - Math.max(ab.y1, bb.y1) > EPS;
+  const overlap = Math.min(ab.y2, bb.y2) - Math.max(ab.y1, bb.y1);
+  if (overlap <= 0) return false;
+  // Only count as overlapping if overlap is significant relative to element size
+  const aH = ab.y2 - ab.y1;
+  const bH = bb.y2 - bb.y1;
+  const minH = Math.min(aH, bH);
+  return minH > 0 && overlap / minH > OVERLAP_RATIO;
 }
 
 function overlapsX(a: IRNode, b: IRNode): boolean {
   const ab = bounds(a.box);
   const bb = bounds(b.box);
-  return Math.min(ab.x2, bb.x2) - Math.max(ab.x1, bb.x1) > EPS;
+  const overlap = Math.min(ab.x2, bb.x2) - Math.max(ab.x1, bb.x1);
+  if (overlap <= 0) return false;
+  const aW = ab.x2 - ab.x1;
+  const bW = bb.x2 - bb.x1;
+  const minW = Math.min(aW, bW);
+  return minW > 0 && overlap / minW > OVERLAP_RATIO;
 }
 
 function median(values: number[]): number {
@@ -250,13 +262,132 @@ function inferContainerLayout(node: IRNode): Layout {
       };
     }
   }
+  // ── Majority-based flex: if most pairs are non-overlapping along one
+  //    axis, use flex — this handles sidebar/overlay patterns where a few
+  //    children span the full height/width but most children stack neatly.
+  if (children.length >= 3) {
+    const n = children.length;
+    const totalPairs = (n * (n - 1)) / 2;
+
+    let yOverlapPairs = 0;
+    let xOverlapPairs = 0;
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        if (overlapsY(children[i], children[j])) yOverlapPairs++;
+        if (overlapsX(children[i], children[j])) xOverlapPairs++;
+      }
+    }
+
+    const yNonOverlapRatio = (totalPairs - yOverlapPairs) / totalPairs;
+    const xNonOverlapRatio = (totalPairs - xOverlapPairs) / totalPairs;
+
+    // If ≥60% of pairs are non-overlapping along an axis, use flex for that axis
+    if (yNonOverlapRatio >= 0.6 && yNonOverlapRatio >= xNonOverlapRatio) {
+      const sorted = [...children].sort((a, b) => a.box.y - b.box.y);
+      const { justify, gap } = inferJustify(sorted, node, 'column');
+      return {
+        type: 'flex',
+        direction: 'column',
+        gap,
+        justifyContent: justify,
+        alignItems: inferCrossAlign(sorted, node, 'column'),
+      };
+    }
+    if (xNonOverlapRatio >= 0.6) {
+      const sorted = [...children].sort((a, b) => a.box.x - b.box.x);
+      const { justify, gap } = inferJustify(sorted, node, 'row');
+      return {
+        type: 'flex',
+        direction: 'row',
+        gap,
+        justifyContent: justify,
+        alignItems: inferCrossAlign(sorted, node, 'row'),
+      };
+    }
+  }
+
   // Fallback to absolute positioning (truly overlapping)
   return { type: 'absolute' };
 }
 
+/**
+ * Post-layout pass: convert fixed-pixel child widths/heights to 'fill'
+ * when they span nearly the full parent content area.
+ */
+function normalizeSizing(node: IRNode): IRNode {
+  if (node.children.length === 0) return node;
+
+  const pw = numOr(node.box.width, 0);
+  const ph = numOr(node.box.height, 0);
+  const [pt, pr, pb, pl] = node.box.padding ?? [0, 0, 0, 0];
+  const contentW = pw - pl - pr;
+  const contentH = ph - pt - pb;
+
+  // Leaf nodes (image, icon, text, vector) keep their explicit dimensions —
+  // component-matching heuristics rely on numeric width/height.
+  const LEAF_TYPES = new Set(['image', 'icon', 'text', 'vector']);
+
+  const children = node.children.map((child) => {
+    let newWidth = child.box.width;
+    let newHeight = child.box.height;
+
+    if (node.layout.type === 'flex' && !LEAF_TYPES.has(child.type)) {
+      const cw = numOr(child.box.width, 0);
+      const ch = numOr(child.box.height, 0);
+
+      if (node.layout.direction === 'column' || !node.layout.direction) {
+        // Vertical flex: child spanning ~full parent width → fill
+        if (typeof cw === 'number' && contentW > 0 && cw / contentW > 0.92) {
+          newWidth = 'fill';
+        }
+      }
+      if (node.layout.direction === 'row') {
+        // Horizontal flex: child spanning ~full parent height → fill height
+        if (typeof ch === 'number' && contentH > 0 && ch / contentH > 0.92) {
+          newHeight = 'fill';
+        }
+      }
+    }
+
+    const updated: IRNode = {
+      ...child,
+      box: { ...child.box, width: newWidth, height: newHeight },
+    };
+    return normalizeSizing(updated);
+  });
+
+  // For flex-row: if all children have equal numeric widths and they tile the parent,
+  // convert them all to 'fill' so they become flex-1
+  if (
+    node.layout.type === 'flex' &&
+    (node.layout.direction === 'row' || !node.layout.direction) &&
+    children.length >= 2
+  ) {
+    const numericWidths = children.map((c) => numOr(c.box.width, -1));
+    const allNumeric = numericWidths.every((w) => w > 0);
+    if (allNumeric) {
+      const totalChildW = numericWidths.reduce((s, w) => s + w, 0);
+      const totalGap = (node.layout.gap ?? 0) * (children.length - 1);
+      if (contentW > 0 && (totalChildW + totalGap) / contentW > 0.9) {
+        const maxW = Math.max(...numericWidths);
+        const minW = Math.min(...numericWidths);
+        // If children are roughly equal width, convert all to fill
+        if (minW / maxW > 0.8) {
+          for (const c of children) {
+            c.box = { ...c.box, width: 'fill' };
+          }
+        }
+      }
+    }
+  }
+
+  return { ...node, children };
+}
+
 export function inferLayout(root: IRNode): IRNode {
-  return map(root, (node) => {
+  const layoutTree = map(root, (node) => {
     if (node.children.length === 0) return node;
     return { ...node, layout: inferContainerLayout(node) };
   });
+  return normalizeSizing(layoutTree);
 }

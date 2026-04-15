@@ -14,9 +14,15 @@ function numOr(n: number | 'auto' | 'fill', fallback: string): string {
   return fallback;
 }
 
-export function buildCssProps(node: IRNode, parentLayout?: 'flex' | 'grid' | 'absolute'): Record<string, string> {
+export function buildCssProps(
+  node: IRNode,
+  parentLayout?: 'flex' | 'grid' | 'absolute',
+  opts?: { parentDirection?: 'row' | 'column'; isRoot?: boolean },
+): Record<string, string> {
   const css: Record<string, string> = {};
   const { box, layout, style, textStyle } = node;
+  const parentDirection = opts?.parentDirection;
+  const isRoot = opts?.isRoot;
 
   // Absolute-positioned child: add absolute + left/top
   if (parentLayout === 'absolute') {
@@ -26,8 +32,33 @@ export function buildCssProps(node: IRNode, parentLayout?: 'flex' | 'grid' | 'ab
   }
 
   // Box sizing
-  if (box.width !== 'auto') css.width = numOr(box.width, 'auto');
-  if (box.height !== 'auto') css.height = numOr(box.height, 'auto');
+  if (isRoot && typeof box.width === 'number') {
+    // Root container: responsive max-width instead of fixed width
+    css['max-width'] = px(box.width);
+    css.width = '100%';
+    css['margin-left'] = 'auto';
+    css['margin-right'] = 'auto';
+  } else if (box.width === 'fill') {
+    if (parentLayout === 'flex' && (parentDirection === 'row' || !parentDirection)) {
+      css.flex = '1 1 0%';
+      css['min-width'] = '0';
+    } else {
+      css.width = '100%';
+    }
+  } else if (box.width !== 'auto') {
+    css.width = numOr(box.width, 'auto');
+  }
+
+  if (box.height === 'fill') {
+    if (parentLayout === 'flex' && parentDirection === 'column') {
+      css.flex = '1 1 0%';
+      css['min-height'] = '0';
+    } else {
+      css.height = '100%';
+    }
+  } else if (box.height !== 'auto') {
+    css.height = numOr(box.height, 'auto');
+  }
   if (box.padding) {
     const [t, r, b, l] = box.padding;
     css.padding = `${px(t)} ${px(r)} ${px(b)} ${px(l)}`;
