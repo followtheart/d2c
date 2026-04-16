@@ -47,6 +47,8 @@ interface Args {
   renderScale?: number;
   // 多页面模式
   allPages?: boolean;
+  /** Split by top-level frames: each FRAME on a Figma page becomes a separate output file. */
+  splitFrames?: boolean;
   /** Run pipeline with stage-by-stage verification. */
   verify?: boolean;
   /** Directory to write per-stage snapshot JSON files. */
@@ -132,6 +134,10 @@ function parseArgs(argv: string[]): Args {
         break;
       case '--all-pages':
         args.allPages = true;
+        break;
+      case '--split-frames':
+        args.splitFrames = true;
+        args.allPages = true; // implies --all-pages
         break;
       case '--render':
         args.render = true;
@@ -232,6 +238,11 @@ Options:
       --all-pages                  Process all pages in the design (instead
                                  of only the first page). Generates one
                                  output per page plus a unified entry file.
+      --split-frames               Split by top-level frames: each FRAME on
+                                 a Figma page becomes a separate web page.
+                                 Use for .fig files where one CANVAS
+                                 contains multiple screens (e.g. CRM).
+                                 Implies --all-pages.
       --verify                     Run pipeline with stage-by-stage verification.
                                  Prints a verification report to stderr.
       --verify-dir <dir>           Write per-stage snapshot JSON files to <dir>.
@@ -283,6 +294,7 @@ Examples:
   d2c -i design.fig -p react -o out/react
   d2c -i design.fig --all-pages -p react -o out/react
   d2c -i design.fig --all-pages --emit-ir out/ir/ --emit-tokens out/tokens/
+  d2c -i crm.fig --split-frames -p html -o out/crm  # each top-level frame → separate page
   d2c -i design.fig --render -o out/fig-preview
   d2c -i make-decoded.json -f make -p react -o out/react
   d2c --render-snapshots snapshots/ --render-output images/
@@ -739,8 +751,12 @@ async function main(): Promise<void> {
   const isFigBuf = (Buffer.isBuffer(raw) || raw instanceof Uint8Array) &&
     (args.format === 'fig' || (args.format === 'auto' && args.input!.endsWith('.fig')));
   if (isFigBuf) {
-    const { parseFig, parseFigMultiPage } = await import('./parser/figBinaryParser');
-    if (args.allPages) {
+    const { parseFig, parseFigMultiPage, parseFigByFrames } = await import('./parser/figBinaryParser');
+    if (args.splitFrames) {
+      const pages = await parseFigByFrames(raw as Buffer);
+      pipelineInput = { name: pages[0]?.name ?? 'Figma Design', pages };
+      pipelineFormat = 'native';
+    } else if (args.allPages) {
       const pages = await parseFigMultiPage(raw as Buffer);
       pipelineInput = { name: pages[0]?.name ?? 'Figma Design', pages };
       pipelineFormat = 'native';
