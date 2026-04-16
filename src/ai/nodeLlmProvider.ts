@@ -100,6 +100,7 @@ const DEFAULT_MODELS: Record<NodeLlmProviderName, string> = {
 
 const DIRECT_OPENAI_COMPATIBLE_PROVIDERS = new Set<NodeLlmProviderName>([
   'siliconflow',
+  'dashscope',
 ]);
 
 const DEFAULT_REQUEST_TIMEOUT_MS: Record<NodeLlmProviderName, number> = {
@@ -114,7 +115,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS: Record<NodeLlmProviderName, number> = {
   bedrock: 60_000,
   zhipuai: 60_000,
   siliconflow: 120_000,
-  dashscope: 60_000,
+  dashscope: 120_000,
 };
 
 const DEFAULT_MAX_TOKENS: Record<NodeLlmProviderName, number> = {
@@ -134,6 +135,7 @@ const DEFAULT_MAX_TOKENS: Record<NodeLlmProviderName, number> = {
 
 const DIRECT_PROVIDER_MAX_RETRIES: Partial<Record<NodeLlmProviderName, number>> = {
   siliconflow: 2,
+  dashscope: 2,
 };
 
 /**
@@ -301,9 +303,10 @@ export class NodeLlmProvider implements LLMProvider {
   async annotate(tree: IRNode): Promise<Record<string, Semantics>> {
     const model = this.config.model ?? DEFAULT_MODELS[this.config.provider];
 
-    const userPrompt =
+    const rawPrompt =
       'Analyze this IR tree and return semantic annotations as JSON.\n\n' +
       JSON.stringify(stripHeavy(tree), null, 2);
+    const userPrompt = truncatePrompt(rawPrompt);
 
     let responseText: string;
     try {
@@ -325,10 +328,11 @@ export class NodeLlmProvider implements LLMProvider {
         responseText = res?.content ?? res?.toString() ?? '';
       }
     } catch (e) {
+      const msg = (e as Error).message ?? String(e);
+      const cause = (e as { cause?: Error }).cause;
+      const detail = cause ? `${msg} (cause: ${cause.message ?? cause})` : msg;
       throw new Error(
-        `NodeLlmProvider (${this.config.provider}/${model}) request failed: ${
-          (e as Error).message ?? String(e)
-        }`,
+        `NodeLlmProvider (${this.config.provider}/${model}) request failed: ${detail}`,
       );
     }
 
@@ -376,6 +380,7 @@ export class NodeLlmProvider implements LLMProvider {
               { role: 'system', content: SYSTEM_PROMPT },
               { role: 'user', content: userPrompt },
             ],
+            ...buildExtraParams(this.config.provider, model),
           }),
           signal: controller.signal,
         });
@@ -407,6 +412,13 @@ export class NodeLlmProvider implements LLMProvider {
           await delay(backoffMs(attempt));
           continue;
         }
+        // Wrap raw fetch errors to include the underlying cause.
+        const cause = (e as { cause?: Error }).cause;
+        if (cause) {
+          throw new Error(
+            `${(e as Error).message} (cause: ${cause.message ?? cause})`,
+          );
+        }
         throw e;
       } finally {
         clearTimeout(timer);
@@ -423,7 +435,9 @@ function isRetryableStatus(status: number): boolean {
 
 function isRetryableError(error: unknown): boolean {
   const message = (error as Error)?.message ?? '';
-  return /timeout|econnreset|socket hang up|temporarily unavailable/i.test(message);
+  const causeMsg = ((error as { cause?: Error })?.cause as Error)?.message ?? '';
+  const combined = `${message} ${causeMsg}`;
+  return /timeout|econnreset|econnrefused|socket hang up|temporarily unavailable|fetch failed/i.test(combined);
 }
 
 function backoffMs(attempt: number): number {
@@ -440,6 +454,25 @@ function extractJson(s: string): string {
   const end = s.lastIndexOf('}');
   if (start === -1 || end === -1) return '{}';
   return s.slice(start, end + 1);
+}
+
+// For dashscope thinking models (qwen3.x), disable thinking to save tokens and time.
+function buildExtraParams(
+  provider: NodeLlmProviderName,
+  model: string,
+): Record<string, unknown> {
+  if (provider === 'dashscope' && /^qwen3/i.test(model)) {
+    return { enable_thinking: false };
+  }
+  return {};
+}
+
+// Max prompt characters (~100k chars ≈ ~30k tokens) to prevent body-too-large errors.
+const MAX_PROMPT_CHARS = 800_000;
+
+function truncatePrompt(prompt: string): string {
+  if (prompt.length <= MAX_PROMPT_CHARS) return prompt;
+  return prompt.slice(0, MAX_PROMPT_CHARS) + '\n... (truncated)';
 }
 
 /** Remove large fields that inflate the prompt without adding semantic signal. */

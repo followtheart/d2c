@@ -8,6 +8,16 @@ function px(n: number): string {
   return `${Math.round(n)}px`;
 }
 
+// 判断颜色是否为深色（亮度 < 128）
+function isDarkColor(hex: string): boolean {
+  const m = hex.match(/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i);
+  if (!m) return false;
+  const r = parseInt(m[1], 16);
+  const g = parseInt(m[2], 16);
+  const b = parseInt(m[3], 16);
+  return (r * 299 + g * 587 + b * 114) / 1000 < 128;
+}
+
 function numOr(n: number | 'auto' | 'fill', fallback: string): string {
   if (typeof n === 'number') return px(n);
   if (n === 'fill') return '100%';
@@ -100,6 +110,24 @@ export function buildCssProps(
   // Style
   if (style.backgroundColor) css['background-color'] = style.backgroundColor;
   if (style.backgroundImage) css['background-image'] = style.backgroundImage;
+
+  // 列表去除默认样式
+  if (node.type === 'list' || node.semantics?.role === 'list') {
+    css['list-style'] = 'none';
+  }
+
+  // Button centering
+  if (node.type === 'button') {
+    if (!css.display) css.display = 'flex';
+    if (!css['align-items']) css['align-items'] = 'center';
+    if (!css['justify-content']) css['justify-content'] = 'center';
+  }
+
+  // Avatar placeholder
+  if (node.semantics?.role === 'avatar' && !style.backgroundColor && !style.backgroundImage && !node.assetRef) {
+    css['background-color'] = '#e0e0e0';
+    css['border-radius'] = '50%';
+  }
   if (style.borderRadius !== undefined) {
     if (Array.isArray(style.borderRadius)) {
       const [tl, tr, br, bl] = style.borderRadius;
@@ -132,6 +160,15 @@ export function buildCssProps(
     if (textStyle.letterSpacing) css['letter-spacing'] = px(textStyle.letterSpacing);
     if (textStyle.fontFamily) css['font-family'] = `"${textStyle.fontFamily}", sans-serif`;
     if (textStyle.textAlign) css['text-align'] = textStyle.textAlign;
+  }
+
+  // 按钮文字对比度修正：深色背景上确保文字可读
+  if (node.type === 'button' && style.backgroundColor && textStyle) {
+    const bg = style.backgroundColor;
+    const fg = textStyle.color;
+    if (isDarkColor(bg) && isDarkColor(fg)) {
+      css.color = '#ffffff';
+    }
   }
 
   return css;

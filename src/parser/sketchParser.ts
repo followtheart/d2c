@@ -216,9 +216,11 @@ function inferSymbolStyle(layer: SketchLayer, style: Style): void {
     if (!style.backgroundColor) style.backgroundColor = '#6c5ce7';
     if (!style.borderRadius) style.borderRadius = 8;
   }
-  // Field/Input — 底部边框
+  // Field/Input — 底部边框（仅对没有子 input 的 field 生效）
   if (n.includes('field') || n.includes('input') || n.includes('text field')) {
-    if (!style.border) {
+    const texts = extractOverrideTexts(layer);
+    const hasInputChildren = (n === 'field' || n.includes('input') || n.includes('text field')) && texts.length >= 2;
+    if (!style.border && !hasInputChildren) {
       style.border = { width: 1, color: '#e0e0e0', style: 'solid' };
     }
   }
@@ -259,7 +261,9 @@ function mapType(layer: SketchLayer): IRNodeType {
     case 'symbolInstance': {
       const n = (layer.name ?? '').toLowerCase();
       if (n.includes('button')) return 'button';
-      if (n.includes('field') || n.includes('input') || n.includes('text field'))
+      // Field/Input 符号包含 label+value 对，映射为 input
+      // 只映射名称正好是 field 或 input 的，排除 text field 之类的复杂符号
+      if (n === 'field' || n === 'input' || n.includes('text field'))
         return 'input';
       return 'container';
     }
@@ -292,6 +296,50 @@ function synthesizeSymbolChildren(layer: SketchLayer): IRNode[] {
   if (texts.length === 0) return [];
   const frame = layer.frame ?? { x: 0, y: 0, width: 0, height: 0 };
   const children: IRNode[] = [];
+  const n = (layer.name ?? '').toLowerCase();
+  const isField = n === 'field' || n.includes('input') || n.includes('text field');
+
+  // Field/Input 符号使用 label + input 子节点结构
+  if (isField && texts.length >= 2) {
+    const labelText = texts[0];
+    const valueText = texts[1];
+    children.push({
+      id: `${layer.do_objectID ?? 'sym'}_label`,
+      name: labelText,
+      type: 'text',
+      box: { x: 0, y: 0, width: frame.width, height: 20 },
+      layout: { type: 'absolute' },
+      style: {},
+      textStyle: {
+        content: labelText,
+        fontSize: 12,
+        fontWeight: 600,
+        color: '#8f92a1',
+      },
+      children: [],
+    });
+    children.push({
+      id: `${layer.do_objectID ?? 'sym'}_input`,
+      name: valueText,
+      type: 'input',
+      box: { x: 0, y: 24, width: frame.width, height: frame.height - 24 },
+      layout: { type: 'absolute' },
+      style: {
+        border: { width: 1, color: '#e0e0e0', style: 'solid' as const },
+        borderRadius: 8,
+      },
+      textStyle: {
+        content: valueText,
+        fontSize: 14,
+        fontWeight: 400,
+        color: '#1e1f20',
+      },
+      semantics: { ariaLabel: labelText },
+      children: [],
+    });
+    return children;
+  }
+
   const lineH = Math.min(24, Math.floor(frame.height / (texts.length + 1)));
   let yOff = Math.max(0, Math.floor((frame.height - texts.length * lineH) / 2));
   for (let i = 0; i < texts.length; i++) {
@@ -325,11 +373,12 @@ function toIRNode(layer: SketchLayer): IRNode {
     height: frame.height,
   };
 
-  // 对 symbolInstance 合成子节点
+  // 对 symbolInstance 合成子节点（button 类型由后续专用逻辑处理）
   const realChildren = (layer.layers ?? [])
     .filter((l) => l.isVisible !== false)
     .map((l) => toIRNode(l));
-  const synthChildren = layer._class === 'symbolInstance' ? synthesizeSymbolChildren(layer) : [];
+  const isButton = mapType(layer) === 'button';
+  const synthChildren = layer._class === 'symbolInstance' && !isButton ? synthesizeSymbolChildren(layer) : [];
   const merged = realChildren.length > 0 ? realChildren : synthChildren;
   // 按 y 坐标排序，保证视觉顺序从上到下
   const allChildren = merged.slice().sort((a, b) => a.box.y - b.box.y);

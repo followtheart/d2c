@@ -149,6 +149,27 @@ ${body}
     return name;
   }
 
+  // 为 input 元素中的文本输入框生成样式类
+  private classForInput(parent: IRNode, valueChild?: IRNode): string {
+    const props: Record<string, string> = {
+      width: '100%',
+      border: 'none',
+      outline: 'none',
+      'background-color': 'transparent',
+    };
+    if (valueChild?.textStyle) {
+      props['font-size'] = `${Math.round(valueChild.textStyle.fontSize)}px`;
+      props['font-weight'] = String(valueChild.textStyle.fontWeight);
+      props.color = valueChild.textStyle.color;
+    }
+    const key = JSON.stringify(props);
+    if (this.classIndex.has(key)) return this.classIndex.get(key)!;
+    const name = `d2c-input-field-${++this.classCounter}`;
+    this.classIndex.set(key, name);
+    this.classCss.push(`.${name} {\n${cssPropsToBlock(props, 2)}\n}`);
+    return name;
+  }
+
   private renderNode(
     node: IRNode,
     indent: number,
@@ -159,10 +180,35 @@ ${body}
     const tag = tagFor(node);
     const className = this.classFor(node, parentLayout, opts);
 
-    // input 元素: 自闭合, 使用 placeholder 属性
+    // input 元素: 包含 label 和 input 子元素
     if (node.type === 'input') {
-      const placeholder = this.escapeText(node.semantics?.ariaLabel ?? '');
-      return `${pad}<input class="${className}" placeholder="${placeholder}" />`;
+      const label = node.semantics?.ariaLabel ?? '';
+      // 从子节点提取标签和值
+      const labelChild = node.children.find((c) => c.textStyle && c.textStyle.fontWeight >= 500);
+      const valueChild = node.children.find((c) => c.textStyle && c.textStyle.fontWeight < 500);
+      // 从子节点的 input 元素继承 border 样式
+      const inputChild = node.children.find((c) => c.type === 'input');
+      const borderNode = inputChild ?? valueChild;
+      const labelText = this.escapeText(labelChild?.textStyle?.content ?? label);
+      const valueText = this.escapeText(valueChild?.textStyle?.content ?? node.textStyle?.content ?? '');
+      const placeholder = this.escapeText(label || labelText);
+      if (labelChild) {
+        // 合并 border 样式到容器节点
+        const wrapperNode = borderNode?.style?.border
+          ? { ...node, style: { ...node.style, border: borderNode.style.border, borderRadius: borderNode.style.borderRadius },
+              box: { ...node.box, padding: node.box.padding ?? [12, 16, 12, 16] } }
+          : node;
+        const wrapperClass = this.classFor(wrapperNode, parentLayout, opts);
+        const labelClass = this.classFor(labelChild, node.layout.type);
+        const inputType = label.toLowerCase().includes('email') ? 'email' : 'text';
+        // 如果语义角色是 list-item，使用 <li> 包裹
+        const wrapTag = node.semantics?.role === 'list-item' ? 'li' : 'div';
+        return `${pad}<${wrapTag} class="${wrapperClass}">
+${pad}  <label class="${labelClass}">${labelText}</label>
+${pad}  <input type="${inputType}" class="${this.classForInput(node, valueChild)}" placeholder="${placeholder}" value="${valueText}" />
+${pad}</${wrapTag}>`;
+      }
+      return `${pad}<input class="${className}" placeholder="${placeholder}" value="${valueText}" />`;
     }
 
     if (node.type === 'image') {
@@ -179,8 +225,12 @@ ${body}
     // 按钮等交互元素: 如果只有一个文本子节点, 将文本内联
     if ((tag === 'button' || tag === 'a') && node.children.length === 1 &&
         (node.children[0].type === 'text' || node.children[0].textStyle)) {
-      const content = this.escapeText(node.children[0].textStyle?.content ?? '');
-      return `${pad}<${tag} class="${className}">${content}</${tag}>`;
+      const child = node.children[0];
+      const content = this.escapeText(child.textStyle?.content ?? '');
+      // 合并子节点文本样式到按钮节点，保留文本颜色和字体
+      const merged = { ...node, textStyle: child.textStyle };
+      const mergedClass = this.classFor(merged, parentLayout, opts);
+      return `${pad}<${tag} class="${mergedClass}">${content}</${tag}>`;
     }
 
     if (node.children.length === 0) {
@@ -189,6 +239,38 @@ ${body}
 
     const childLayout = node.layout.type;
     const childDirection = node.layout.direction;
+
+    // <ul>/<ol> 只能包含 <li> 子节点，其他子节点提升到列表外
+    if (tag === 'ul' || tag === 'ol') {
+      const isListItem = (c: IRNode) => c.type === 'list-item' || c.semantics?.role === 'list-item';
+      const listItems = node.children.filter(isListItem);
+      const nonListItems = node.children.filter((c) => !isListItem(c));
+
+      // 如果同时含有列表项和非列表项，用 <div> 容器避免非法 HTML
+      if (nonListItems.length > 0 && listItems.length > 0) {
+        const childrenHtml = node.children
+          .map((c) => this.renderNode(c, indent + 2, childLayout, { parentDirection: childDirection }))
+          .join('\n');
+        return `${pad}<div class="${className}">
+${childrenHtml}
+${pad}</div>`;
+      }
+
+      if (listItems.length > 0) {
+        const liHtml = listItems
+          .map((c) => this.renderNode(c, indent + 2, childLayout, { parentDirection: childDirection }))
+          .join('\n');
+        return `${pad}<${tag} class="${className}">\n${liHtml}\n${pad}</${tag}>`;
+      }
+
+      // 无列表项，按普通容器渲染
+      const parts: string[] = [];
+      for (const c of nonListItems) {
+        parts.push(this.renderNode(c, indent, parentLayout, { parentDirection: opts?.parentDirection }));
+      }
+      return parts.join('\n');
+    }
+
     const childrenHtml = node.children
       .map((c) => this.renderNode(c, indent + 2, childLayout, { parentDirection: childDirection }))
       .join('\n');

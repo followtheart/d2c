@@ -48,8 +48,9 @@ function pickRoleByName(name: string): SemanticRole | undefined {
 // 检查文本节点是否在容器范围内
 function boxContains(outer: { x: number; y: number; width: number | 'auto' | 'fill'; height: number | 'auto' | 'fill' },
   inner: { x: number; y: number; width: number | 'auto' | 'fill'; height: number | 'auto' | 'fill' }): boolean {
-  const ow = typeof outer.width === 'number' ? outer.width : 0;
-  const oh = typeof outer.height === 'number' ? outer.height : 0;
+  // "fill" 表示撑满父容器，视为极大值
+  const ow = typeof outer.width === 'number' ? outer.width : (outer.width === 'fill' ? 9999 : 0);
+  const oh = typeof outer.height === 'number' ? outer.height : (outer.height === 'fill' ? 9999 : 0);
   const iw = typeof inner.width === 'number' ? inner.width : 0;
   const ih = typeof inner.height === 'number' ? inner.height : 0;
   const tol = 2;
@@ -63,28 +64,40 @@ function boxArea(box: { width: number | 'auto' | 'fill'; height: number | 'auto'
   return w * h;
 }
 
-// 将空间上包含在兄弟容器内的文本节点重新归入容器中
+// 将空间上包含在兄弟容器内的节点重新归入容器中
 function mergeOverlappingSiblings(node: IRNode): IRNode {
   if (node.children.length < 2) return node;
-  const textIndices: number[] = [];
+  // 找出大面积容器（可能是背景面板）和其他节点
   const containerIndices: number[] = [];
+  const otherIndices: number[] = [];
   for (let i = 0; i < node.children.length; i++) {
     const c = node.children[i];
-    if (c.type === 'text' || c.textStyle) textIndices.push(i);
-    else containerIndices.push(i);
+    if ((c.type === 'container' || c.type === 'list') && c.children.length === 0 &&
+        (c.style.backgroundColor || c.style.backgroundImage)) {
+      containerIndices.push(i);
+    } else {
+      otherIndices.push(i);
+    }
   }
-  if (!textIndices.length || !containerIndices.length) return node;
+  // 同时包含纯文本和非文本节点
+  const allMoveIndices: number[] = [];
+  for (let i = 0; i < node.children.length; i++) {
+    const c = node.children[i];
+    // 排除背景容器自身
+    if (!containerIndices.includes(i)) allMoveIndices.push(i);
+  }
+  if (!allMoveIndices.length || !containerIndices.length) return node;
 
-  // 为每个文本节点找到最小的包含它的容器兄弟
+  // 为每个可移动节点找到最小的包含它的容器兄弟
   const mergeMap = new Map<number, number[]>();
-  const mergedTextIndices = new Set<number>();
-  for (const ti of textIndices) {
-    const text = node.children[ti];
+  const mergedIndices = new Set<number>();
+  for (const mi of allMoveIndices) {
+    const child = node.children[mi];
     let bestIdx = -1;
     let bestArea = Infinity;
     for (const ci of containerIndices) {
       const container = node.children[ci];
-      if (boxContains(container.box, text.box)) {
+      if (boxContains(container.box, child.box)) {
         const area = boxArea(container.box);
         if (area < bestArea) {
           bestArea = area;
@@ -94,23 +107,23 @@ function mergeOverlappingSiblings(node: IRNode): IRNode {
     }
     if (bestIdx >= 0) {
       if (!mergeMap.has(bestIdx)) mergeMap.set(bestIdx, []);
-      mergeMap.get(bestIdx)!.push(ti);
-      mergedTextIndices.add(ti);
+      mergeMap.get(bestIdx)!.push(mi);
+      mergedIndices.add(mi);
     }
   }
-  if (!mergedTextIndices.size) return node;
+  if (!mergedIndices.size) return node;
 
   // 重建子节点列表
   const newChildren: IRNode[] = [];
   for (let i = 0; i < node.children.length; i++) {
-    if (mergedTextIndices.has(i)) continue;
+    if (mergedIndices.has(i)) continue;
     let child = node.children[i];
-    const texts = mergeMap.get(i);
-    if (texts) {
-      // 将文本重新归入该容器, 并调整坐标为相对坐标
-      const adjusted = texts.map((ti) => {
-        const t = node.children[ti];
-        return { ...t, box: { ...t.box, x: t.box.x - child.box.x, y: t.box.y - child.box.y } };
+    const movedIds = mergeMap.get(i);
+    if (movedIds) {
+      // 将节点重新归入该容器, 并调整坐标为相对坐标
+      const adjusted = movedIds.map((mi) => {
+        const m = node.children[mi];
+        return { ...m, box: { ...m.box, x: m.box.x - child.box.x, y: m.box.y - child.box.y } };
       });
       child = { ...child, children: [...child.children, ...adjusted] };
     }
@@ -170,7 +183,8 @@ function detectLists(node: IRNode): IRNode {
         sigs[i] === dominant[0]
           ? {
               ...c,
-              type: 'list-item',
+              // 保留 input 类型，仅添加 list-item 语义角色
+              type: c.type === 'input' ? 'input' : 'list-item',
               semantics: { ...c.semantics, role: 'list-item' },
             }
           : c,
@@ -195,12 +209,17 @@ function convertInputNodes(node: IRNode): IRNode {
   return node;
 }
 
-function ruleEnhanceNode(node: IRNode, depth: number): IRNode {
+function ruleEnhanceNode(node: IRNode, depth: number, parentType?: string): IRNode {
   const semantics: Semantics = { ...(node.semantics ?? {}) };
 
   if (!semantics.role) {
-    const roleByName = pickRoleByName(node.name);
-    if (roleByName) semantics.role = roleByName;
+    // text inside input/list-item parents → label role (not heading)
+    if (node.type === 'text' && (parentType === 'input' || parentType === 'list-item')) {
+      semantics.role = 'label';
+    } else {
+      const roleByName = pickRoleByName(node.name);
+      if (roleByName) semantics.role = roleByName;
+    }
   }
 
   if (!semantics.role) {
@@ -234,11 +253,11 @@ function ruleEnhance(root: IRNode): IRNode {
   return walkWithDepth(withLists, 0);
 }
 
-function walkWithDepth(node: IRNode, depth: number): IRNode {
-  const annotated = ruleEnhanceNode(node, depth);
+function walkWithDepth(node: IRNode, depth: number, parentType?: string): IRNode {
+  const annotated = ruleEnhanceNode(node, depth, parentType);
   return {
     ...annotated,
-    children: annotated.children.map((c) => walkWithDepth(c, depth + 1)),
+    children: annotated.children.map((c) => walkWithDepth(c, depth + 1, annotated.type)),
   };
 }
 

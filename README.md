@@ -478,8 +478,8 @@ node dist/cli.js --render-snapshots snapshots/ --snapshot-format png --render-ou
 # OpenRouter（默认使用 gpt-4o）
 OPENROUTER_API_KEY=sk-or-xxx node dist/cli.js --compare-stages --render-output img/ --compare-report report.md
 
-# Anthropic（默认使用 claude-sonnet-4-20250514）
-ANTHROPIC_API_KEY=sk-ant-xxx node dist/cli.js --compare-stages --render-output img/ --vision-provider anthropic
+# aliyun 默认qwen3.6-plus
+node dist/cli.js --compare-stages --render-output out/png --vision-provider dashscope
 ```
 
 比对引擎会：
