@@ -83,7 +83,22 @@ function normPadding(
   return p;
 }
 
+function isAlreadyIRNode(input: unknown): input is IRNode {
+  if (!input || typeof input !== 'object') return false;
+  const obj = input as Record<string, unknown>;
+  return obj.box !== undefined && typeof obj.box === 'object' &&
+    'x' in (obj.box as object) && 'width' in (obj.box as object);
+}
+
 function toNode(input: NativeInputNode): IRNode {
+  if (isAlreadyIRNode(input)) {
+    const ir = input as IRNode;
+    return {
+      ...ir,
+      children: (ir.children ?? []).map((c) => toNode(c as unknown as NativeInputNode)),
+    };
+  }
+
   const type: IRNodeType = input.type ?? 'container';
 
   const box: Box = {
