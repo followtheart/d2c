@@ -32,6 +32,12 @@ const DEFAULTS: Required<ScreenshotOptions> = {
 };
 
 /**
+ * Chrome CDP limits the screenshot bitmap to ~16384px per dimension.
+ * With deviceScaleFactor = 2, the max content height is 16384 / 2 = 8192.
+ */
+const MAX_CAPTURE_HEIGHT = 16384;
+
+/**
  * Dynamically import Playwright.  Throws a friendly error when it is
  * not installed or the Chromium binary is missing.
  */
@@ -43,6 +49,35 @@ async function loadPlaywright(): Promise<typeof import('playwright')> {
       'Playwright is required for PNG screenshot rendering but is not installed.\n' +
         '  npm install playwright\n' +
         '  npx playwright install chromium',
+    );
+  }
+}
+
+/**
+ * Take a screenshot with automatic fallback: if `fullPage: true` fails
+ * (e.g. page exceeds CDP bitmap limits), retry with a height-clipped capture.
+ */
+async function safeScreenshot(
+  page: import('playwright').Page,
+  outputPath: string,
+  fullPage: boolean,
+  scaleFactor: number,
+): Promise<void> {
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  try {
+    await page.screenshot({ path: outputPath, fullPage });
+  } catch (err: unknown) {
+    if (!fullPage) throw err;
+    // fullPage failed — clip to the max safe height
+    const maxH = Math.floor(MAX_CAPTURE_HEIGHT / scaleFactor);
+    const vp = page.viewportSize();
+    const clipW = vp?.width ?? 1280;
+    await page.screenshot({
+      path: outputPath,
+      clip: { x: 0, y: 0, width: clipW, height: maxH },
+    });
+    console.error(
+      `  warning: page too tall for fullPage screenshot, clipped to ${maxH}px → ${path.basename(outputPath)}`,
     );
   }
 }
@@ -64,11 +99,7 @@ export async function captureScreenshot(
       deviceScaleFactor: o.deviceScaleFactor,
     });
     await page.setContent(html, { waitUntil: 'networkidle' });
-    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-    await page.screenshot({
-      path: outputPath,
-      fullPage: o.fullPage,
-    });
+    await safeScreenshot(page, outputPath, o.fullPage, o.deviceScaleFactor);
   } finally {
     await browser.close();
   }
@@ -104,11 +135,7 @@ export async function captureScreenshots(
           });
           try {
             await page.setContent(job.html, { waitUntil: 'networkidle' });
-            fs.mkdirSync(path.dirname(job.outputPath), { recursive: true });
-            await page.screenshot({
-              path: job.outputPath,
-              fullPage: o.fullPage,
-            });
+            await safeScreenshot(page, job.outputPath, o.fullPage, o.deviceScaleFactor);
           } finally {
             await page.close();
           }
