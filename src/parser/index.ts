@@ -93,5 +93,5 @@ export function parseDesignMultiPage(raw: unknown, format: DesignFormat = 'auto'
 export { parseFigma, parseFigmaMultiPage, parseNativeDesign, parseNativeDesignMultiPage, parseSketch, parseSketchMultiPage };
 export { parseMakeJson, parseMakeJsonMultiPage, isMakeJson } from './makeParser';
 export type { MakeDocument, MakeNode, MakeCodeFile } from './makeParser';
-export { parseFig, parseFigMultiPage, parseFigBinary, isFigBinary } from './figBinaryParser';
+export { parseFig, parseFigMultiPage, parseFigByFrames, parseFigBinary, isFigBinary } from './figBinaryParser';
 export type { FigDocument, FigPage } from './figBinaryParser';

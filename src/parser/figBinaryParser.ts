@@ -821,3 +821,43 @@ export async function parseFigMultiPage(buf: Buffer): Promise<IRDocument[]> {
   }
   return doc.pages.map((page) => pageToIRDocument(page, doc.name, doc.width, doc.height));
 }
+
+// Split by top-level FRAMEs: each FRAME on each CANVAS page becomes a separate IRDocument.
+// This is the typical CRM / multi-screen design pattern where one Figma "page" (CANVAS)
+// contains multiple top-level frames, each representing a distinct web page / screen.
+export async function parseFigByFrames(buf: Buffer): Promise<IRDocument[]> {
+  const doc = await parseFigBinary(buf);
+  if (doc.pages.length === 0) {
+    throw new Error('No pages found in the .fig file');
+  }
+  const results: IRDocument[] = [];
+  for (const page of doc.pages) {
+    const frames = (page.children ?? []).filter(
+      (n) => n.type === 'FRAME' && n.visible !== false,
+    );
+    if (frames.length === 0) {
+      // No top-level frames — fall back to treating the whole page as one document
+      results.push(pageToIRDocument(page, doc.name, doc.width, doc.height));
+    } else {
+      for (const frame of frames) {
+        results.push(frameToIRDocument(frame, page.name));
+      }
+    }
+  }
+  return results;
+}
+
+// Convert a single top-level FRAME into an IRDocument
+function frameToIRDocument(frame: FigNode, pageName: string): IRDocument {
+  const width = frame.width || 1440;
+  const height = frame.height || 900;
+  const rootNode = figNodeToIR(frame);
+  const ir: IRDocument = {
+    name: frame.name || pageName,
+    width,
+    height,
+    root: rootNode,
+  };
+  validateIR(ir);
+  return ir;
+}
