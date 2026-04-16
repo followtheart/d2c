@@ -197,7 +197,7 @@ Options:
   -o, --out <dir|->              Output directory, or '-' for stdout
   -p, --platform <name>          Target platform: react | vue | html |
                                  react-native | flutter (default: react)
-  -f, --format <name>            Input format: figma | sketch | native | make | auto
+  -f, --format <name>            Input format: figma | sketch | native | make | fig | auto
       --emit-ir <file>           Also write the intermediate IR JSON
       --emit-tokens <file>       Write design tokens (style-dictionary JSON)
       --emit-tailwind <file>     Write a Tailwind preset (theme.extend) module
@@ -274,6 +274,9 @@ Examples:
   d2c -i sketch.json --render --render-format svg -o out/svg
   d2c -i sketch.json --render --render-scale 2 -o out/preview
   d2c -i design.make --render -o out/make-preview
+  d2c -i design.fig -p react -o out/react
+  d2c -i design.fig --all-pages -p react -o out/react
+  d2c -i design.fig --render -o out/fig-preview
   d2c -i make-decoded.json -f make -p react -o out/react
   d2c --render-snapshots snapshots/ --render-output images/
   d2c --render-snapshots snapshots/ --snapshot-format html --render-output out/html
@@ -296,6 +299,10 @@ function resolveInput(inputPath: string, format: DesignFormat): unknown {
   }
   // .make binary files are read as Buffer for binary parsing
   if (format === 'make' || (format === 'auto' && inputPath.endsWith('.make'))) {
+    return fs.readFileSync(inputPath); // returns Buffer
+  }
+  // .fig binary files are read as Buffer for binary parsing
+  if (format === 'fig' || (format === 'auto' && inputPath.endsWith('.fig'))) {
     return fs.readFileSync(inputPath); // returns Buffer
   }
   const raw = JSON.parse(fs.readFileSync(inputPath, 'utf8'));
@@ -505,9 +512,56 @@ async function main(): Promise<void> {
     const format = args.renderFormat ?? 'html';
     const out = args.out ?? '-';
 
+    // ── Figma .fig binary render ──────────────────────────────────────
+    const isBinaryBuf = Buffer.isBuffer(raw) || (raw instanceof Uint8Array);
+    const isFigFile = isBinaryBuf && (args.format === 'fig' || (args.format === 'auto' && args.input!.endsWith('.fig')));
+    if (isFigFile) {
+      const { parseFigBinary } = await import('./parser/figBinaryParser');
+      const figDoc = await parseFigBinary(raw as Buffer);
+      // Convert to MakeDocument-compatible shape for rendering
+      const { parseMakeJsonToMakeDoc } = await import('./parser/makeParser');
+      const nodes = figDoc.pages.flatMap((p) => p.children);
+      const makeDoc = parseMakeJsonToMakeDoc({
+        name: figDoc.name,
+        nodes,
+        codeFiles: [],
+        width: figDoc.width,
+        height: figDoc.height,
+      });
+      const result = renderer.renderMake(makeDoc, { scale });
+
+      if (format === 'html') {
+        if (out === '-') {
+          console.log(result.html);
+        } else {
+          fs.mkdirSync(out, { recursive: true });
+          const htmlPath = path.join(out, 'preview.html');
+          fs.writeFileSync(htmlPath, result.html);
+          console.error(`d2c render (fig): wrote ${htmlPath}`);
+        }
+      } else {
+        if (out === '-') {
+          for (const [name, svg] of result.svgs) {
+            console.log(`<!-- ===== ${name} ===== -->`);
+            console.log(svg);
+          }
+        } else {
+          fs.mkdirSync(out, { recursive: true });
+          for (const [name, svg] of result.svgs) {
+            const safeName = name.replace(/[^a-zA-Z0-9_-]/g, '_');
+            const svgPath = path.join(out, `${safeName}.svg`);
+            fs.writeFileSync(svgPath, svg);
+            if (args.verbose) console.error(`wrote ${svgPath}`);
+          }
+          console.error(`d2c render (fig): wrote ${result.svgs.size} SVG file(s) → ${out}`);
+        }
+      }
+      return;
+    }
+
     // ── Figma Make binary render ──────────────────────────────────────
-    const isMakeBuf = Buffer.isBuffer(raw) || (raw instanceof Uint8Array);
-    const isMakeJson = !isMakeBuf && args.format === 'make';
+    const isMakeBuf = isBinaryBuf && !isFigFile;
+    const isMakeJson = !isBinaryBuf && args.format === 'make';
     if (isMakeBuf || isMakeJson) {
       const { parseMakeBinary, parseMakeJsonToMakeDoc } = await import('./parser/makeParser');
       const makeDoc = isMakeBuf
@@ -672,6 +726,24 @@ async function main(): Promise<void> {
     });
   }
 
+  // Pre-parse .fig binary → native IR so the pipeline can process it.
+  let pipelineInput: unknown = raw;
+  let pipelineFormat: DesignFormat = args.format;
+  const isFigBuf = (Buffer.isBuffer(raw) || raw instanceof Uint8Array) &&
+    (args.format === 'fig' || (args.format === 'auto' && args.input!.endsWith('.fig')));
+  if (isFigBuf) {
+    const { parseFig, parseFigMultiPage } = await import('./parser/figBinaryParser');
+    if (args.allPages) {
+      const pages = await parseFigMultiPage(raw as Buffer);
+      pipelineInput = { name: pages[0]?.name ?? 'Figma Design', pages };
+      pipelineFormat = 'native';
+    } else {
+      const ir = await parseFig(raw as Buffer);
+      pipelineInput = { name: ir.name, width: ir.width, height: ir.height, root: ir.root };
+      pipelineFormat = 'native';
+    }
+  }
+
   // Pre-parse responsive variants (each one runs through Parse + Layout
   // inference so the diff sees the same shape as the base IR).
   const { parseDesign } = await import('./parser');
@@ -691,7 +763,7 @@ async function main(): Promise<void> {
   }
 
   const pipelineOpts = {
-    format: args.format,
+    format: pipelineFormat,
     platform: args.platform,
     verbose: args.verbose,
     llm,
@@ -703,7 +775,7 @@ async function main(): Promise<void> {
 
   // 多页面模式
   if (args.allPages) {
-    const multiResult = await runMultiPagePipeline(raw, pipelineOpts);
+    const multiResult = await runMultiPagePipeline(pipelineInput, pipelineOpts);
     const { generated } = multiResult;
     const out = args.out ?? '-';
     if (out === '-') {
@@ -728,8 +800,8 @@ async function main(): Promise<void> {
 
   // Choose verified or standard pipeline
   const result = args.verify
-    ? await runPipelineWithVerification(raw, pipelineOpts)
-    : await runPipeline(raw, pipelineOpts);
+    ? await runPipelineWithVerification(pipelineInput, pipelineOpts)
+    : await runPipeline(pipelineInput, pipelineOpts);
   const { ir, generated, tokens, styleDictionary, tailwindPreset, diff } = result;
   void tokens; // tokens are exposed via styleDictionary
 

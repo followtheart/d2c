@@ -4,7 +4,7 @@ import { parseNativeDesign, parseNativeDesignMultiPage } from './nativeParser';
 import { parseSketch, parseSketchMultiPage } from './sketchParser';
 import { parseMakeJson, parseMakeJsonMultiPage, isMakeJson } from './makeParser';
 
-export type DesignFormat = 'figma' | 'native' | 'sketch' | 'make' | 'auto';
+export type DesignFormat = 'figma' | 'native' | 'sketch' | 'make' | 'fig' | 'auto';
 
 /**
  * Dispatch a raw design JSON to the right parser.
@@ -24,6 +24,12 @@ export function parseDesign(raw: unknown, format: DesignFormat = 'auto'): IRDocu
       return parseNativeDesign(raw);
     case 'make':
       return parseMakeJson(raw);
+    case 'fig':
+      throw new Error(
+        'The .fig binary format requires async parsing. ' +
+        'Use parseFig() from parser/figBinaryParser instead, ' +
+        'or let the CLI handle .fig files automatically.',
+      );
     default:
       throw new Error(`Unsupported design format: ${fmt}`);
   }
@@ -71,6 +77,12 @@ export function parseDesignMultiPage(raw: unknown, format: DesignFormat = 'auto'
     case 'make':
       pages = parseMakeJsonMultiPage(raw);
       break;
+    case 'fig':
+      throw new Error(
+        'The .fig binary format requires async parsing. ' +
+        'Use parseFigMultiPage() from parser/figBinaryParser instead, ' +
+        'or let the CLI handle .fig files automatically.',
+      );
     default:
       throw new Error(`Unsupported design format: ${fmt}`);
   }
@@ -81,3 +93,5 @@ export function parseDesignMultiPage(raw: unknown, format: DesignFormat = 'auto'
 export { parseFigma, parseFigmaMultiPage, parseNativeDesign, parseNativeDesignMultiPage, parseSketch, parseSketchMultiPage };
 export { parseMakeJson, parseMakeJsonMultiPage, isMakeJson } from './makeParser';
 export type { MakeDocument, MakeNode, MakeCodeFile } from './makeParser';
+export { parseFig, parseFigMultiPage, parseFigBinary, isFigBinary } from './figBinaryParser';
+export type { FigDocument, FigPage } from './figBinaryParser';
