@@ -264,6 +264,12 @@ export interface MultiPagePipelineResult {
   generated: GenerateResult;
 }
 
+// 多页面 pipeline 带验证的结果
+export interface MultiPageVerifiedPipelineResult {
+  pages: VerifiedPipelineResult[];
+  generated: GenerateResult;
+}
+
 // 多页面 pipeline：对每个页面分别运行 pipeline，最后合并生成代码
 export async function runMultiPagePipeline(
   rawInput: unknown,
@@ -299,5 +305,42 @@ export async function runMultiPagePipeline(
   const generated = generator.generateMultiPage(irs);
 
   log(opts.verbose, 'Done (multi-page).');
+  return { pages: pageResults, generated };
+}
+
+// 多页面 pipeline（带验证）：对每个页面分别运行带验证的 pipeline，最后合并生成代码
+export async function runMultiPagePipelineWithVerification(
+  rawInput: unknown,
+  opts: PipelineOptions,
+): Promise<MultiPageVerifiedPipelineResult> {
+  log(opts.verbose, '[multi-verify] Parsing all pages...');
+  const multiDoc = parseDesignMultiPage(rawInput, opts.format ?? 'auto');
+
+  // 单页面退化为原流程
+  if (multiDoc.pages.length <= 1) {
+    const single = await runPipelineWithVerification(rawInput, opts);
+    return { pages: [single], generated: single.generated };
+  }
+
+  const pageResults: VerifiedPipelineResult[] = [];
+  for (let i = 0; i < multiDoc.pages.length; i++) {
+    const page = multiDoc.pages[i];
+    log(opts.verbose, `[multi-verify] Processing page ${i + 1}/${multiDoc.pages.length}: ${page.name}`);
+    const pageRaw = {
+      name: page.name,
+      width: page.width,
+      height: page.height,
+      root: page.root,
+    };
+    const result = await runPipelineWithVerification(pageRaw, { ...opts, format: 'native' });
+    pageResults.push(result);
+  }
+
+  log(opts.verbose, '[multi-verify] Merging multi-page output...');
+  const generator = createGenerator(opts.platform);
+  const irs = pageResults.map((r) => r.ir);
+  const generated = generator.generateMultiPage(irs);
+
+  log(opts.verbose, 'Done (multi-page with verification).');
   return { pages: pageResults, generated };
 }

@@ -10,7 +10,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import { runPipeline, runMultiPagePipeline, runPipelineWithVerification } from './pipeline/d2cPipeline';
+import { runPipeline, runMultiPagePipeline, runPipelineWithVerification, runMultiPagePipelineWithVerification } from './pipeline/d2cPipeline';
 import { formatVerificationReport, snapshotToJSON } from './pipeline/verify';
 import type { Platform } from './codegen/factory';
 import type { DesignFormat } from './parser';
@@ -775,7 +775,9 @@ async function main(): Promise<void> {
 
   // 多页面模式
   if (args.allPages) {
-    const multiResult = await runMultiPagePipeline(pipelineInput, pipelineOpts);
+    const multiResult = args.verify
+      ? await runMultiPagePipelineWithVerification(pipelineInput, pipelineOpts)
+      : await runMultiPagePipeline(pipelineInput, pipelineOpts);
     const { generated } = multiResult;
     const out = args.out ?? '-';
     if (out === '-') {
@@ -794,6 +796,36 @@ async function main(): Promise<void> {
       console.error(
         `d2c: generated ${generated.files.length} file(s) for ${multiResult.pages.length} page(s) \u2192 ${out} (entry: ${generated.entryFile})`,
       );
+    }
+
+    // 多页面验证报告 & 快照写入
+    if (args.verify && 'pages' in multiResult) {
+      const verifiedResult = multiResult as Awaited<ReturnType<typeof runMultiPagePipelineWithVerification>>;
+      for (let i = 0; i < verifiedResult.pages.length; i++) {
+        const page = verifiedResult.pages[i];
+        const pageName = page.ir.name ?? `page_${i + 1}`;
+        console.error(`\n── Verification: ${pageName} ──`);
+        console.error(formatVerificationReport(page.verification));
+
+        if (args.verifyDir) {
+          const pageDir = path.join(args.verifyDir, pageName);
+          fs.mkdirSync(pageDir, { recursive: true });
+          for (const snap of page.verification.snapshots) {
+            const filePath = path.join(pageDir, `${snap.stage}.json`);
+            fs.writeFileSync(filePath, JSON.stringify(snapshotToJSON(snap), null, 2));
+          }
+          console.error(`d2c verify: wrote ${page.verification.snapshots.length} snapshot(s) → ${pageDir}`);
+        }
+      }
+
+      if (args.verifyDir) {
+        if (args.renderSnapshots) {
+          await renderSnapshotsCommand(args);
+        }
+        if (args.compareStages) {
+          await compareStagesCommand(args);
+        }
+      }
     }
     return;
   }
