@@ -198,10 +198,16 @@ Options:
   -p, --platform <name>          Target platform: react | vue | html |
                                  react-native | flutter (default: react)
   -f, --format <name>            Input format: figma | sketch | native | make | fig | auto
-      --emit-ir <file>           Also write the intermediate IR JSON
-      --emit-tokens <file>       Write design tokens (style-dictionary JSON)
-      --emit-tailwind <file>     Write a Tailwind preset (theme.extend) module
-      --emit-diff <file>         Write structural IR diff against --prev-ir
+      --emit-ir <path>           Also write the intermediate IR JSON.
+                                 With --all-pages, <path> is treated as a
+                                 directory and each page is written as
+                                 <path>/<pageName>.json.
+      --emit-tokens <path>       Write design tokens (style-dictionary JSON).
+                                 With --all-pages, per-page files in <path>/.
+      --emit-tailwind <path>     Write a Tailwind preset (theme.extend) module.
+                                 With --all-pages, per-page files in <path>/.
+      --emit-diff <path>         Write structural IR diff against --prev-ir.
+                                 With --all-pages, per-page files in <path>/.
       --component-library <lib>  Match nodes to a component library: antd | mui
       --responsive <bp>=<file>   Add a responsive variant for breakpoint <bp>
                                  (repeatable, e.g. --responsive sm=mobile.json)
@@ -276,6 +282,7 @@ Examples:
   d2c -i design.make --render -o out/make-preview
   d2c -i design.fig -p react -o out/react
   d2c -i design.fig --all-pages -p react -o out/react
+  d2c -i design.fig --all-pages --emit-ir out/ir/ --emit-tokens out/tokens/
   d2c -i design.fig --render -o out/fig-preview
   d2c -i make-decoded.json -f make -p react -o out/react
   d2c --render-snapshots snapshots/ --render-output images/
@@ -796,6 +803,58 @@ async function main(): Promise<void> {
       console.error(
         `d2c: generated ${generated.files.length} file(s) for ${multiResult.pages.length} page(s) \u2192 ${out} (entry: ${generated.entryFile})`,
       );
+    }
+
+    // 多页面 --emit-ir / --emit-tokens / --emit-tailwind / --emit-diff
+    const safePageName = (name: string) =>
+      name.replace(/[^a-zA-Z0-9_\u4e00-\u9fff -]/g, '_').replace(/^_+|_+$/g, '') || 'page';
+
+    if (args.emitIR) {
+      const dir = args.emitIR;
+      fs.mkdirSync(dir, { recursive: true });
+      for (const page of multiResult.pages) {
+        const safeName = safePageName(page.ir.name);
+        const filePath = path.join(dir, `${safeName}.json`);
+        fs.writeFileSync(filePath, JSON.stringify(page.ir, null, 2));
+        if (args.verbose) console.error(`IR written to ${filePath}`);
+      }
+      console.error(`d2c: wrote ${multiResult.pages.length} IR file(s) → ${dir}`);
+    }
+    if (args.emitTokens) {
+      const dir = args.emitTokens;
+      fs.mkdirSync(dir, { recursive: true });
+      for (const page of multiResult.pages) {
+        const safeName = safePageName(page.ir.name);
+        const filePath = path.join(dir, `${safeName}.json`);
+        fs.writeFileSync(filePath, JSON.stringify(page.styleDictionary, null, 2));
+        if (args.verbose) console.error(`tokens written to ${filePath}`);
+      }
+      console.error(`d2c: wrote ${multiResult.pages.length} token file(s) → ${dir}`);
+    }
+    if (args.emitTailwind) {
+      const dir = args.emitTailwind;
+      fs.mkdirSync(dir, { recursive: true });
+      for (const page of multiResult.pages) {
+        const safeName = safePageName(page.ir.name);
+        const filePath = path.join(dir, `${safeName}.js`);
+        fs.writeFileSync(filePath, page.tailwindPreset);
+        if (args.verbose) console.error(`tailwind preset written to ${filePath}`);
+      }
+      console.error(`d2c: wrote ${multiResult.pages.length} tailwind file(s) → ${dir}`);
+    }
+    if (args.emitDiff) {
+      const pagesWithDiff = multiResult.pages.filter((p) => p.diff);
+      if (pagesWithDiff.length > 0) {
+        const dir = args.emitDiff;
+        fs.mkdirSync(dir, { recursive: true });
+        for (const page of pagesWithDiff) {
+          const safeName = safePageName(page.ir.name);
+          const filePath = path.join(dir, `${safeName}.json`);
+          fs.writeFileSync(filePath, JSON.stringify(page.diff, null, 2));
+          if (args.verbose) console.error(`diff written to ${filePath}`);
+        }
+        console.error(`d2c: wrote ${pagesWithDiff.length} diff file(s) → ${dir}`);
+      }
     }
 
     // 多页面验证报告 & 快照写入
