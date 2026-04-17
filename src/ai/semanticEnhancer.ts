@@ -194,16 +194,34 @@ function detectLists(node: IRNode): IRNode {
   return node;
 }
 
+// 在子树中寻找首个非空文本, 用作输入框的 aria-label/placeholder.
+function findFirstTextContent(node: IRNode): string | undefined {
+  if (node.textStyle?.content) return node.textStyle.content;
+  for (const c of node.children) {
+    const found = findFirstTextContent(c);
+    if (found) return found;
+  }
+  return undefined;
+}
+
 // 将名称含 input/field 的容器转换为 input 节点
 function convertInputNodes(node: IRNode): IRNode {
   if (isInputLike(node)) {
+    // Prefer a direct text child, but fall back to *any* descendant text so
+    // that placeholder survives upstream tree-rewrites (e.g. overlapping
+    // siblings that move labels into different subtrees).
     const textChild = node.children.find((c) => c.type === 'text');
-    const placeholder = textChild?.textStyle?.content;
+    const placeholder =
+      textChild?.textStyle?.content || findFirstTextContent(node);
     return {
       ...node,
       type: 'input',
       children: [],
-      semantics: { ...node.semantics, ariaLabel: placeholder, componentName: pascalCase(node.name || 'input') },
+      semantics: {
+        ...node.semantics,
+        ariaLabel: placeholder,
+        componentName: pascalCase(node.name || 'input'),
+      },
     };
   }
   return node;

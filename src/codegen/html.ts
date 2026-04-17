@@ -20,9 +20,36 @@ const HTML_TAG_BY_ROLE: Partial<Record<SemanticRole, string>> = {
   label: 'label',
 };
 
+/**
+ * Recognise interactive component patterns that semantics stage names in
+ * PascalCase (e.g. `FloatingActionButton`, `SaveEvent`, `Switch`,
+ * `ToggleSwitch`, `ElmMainbutton`). These frequently arrive without a
+ * `semantics.role` tag yet should still render as interactive HTML
+ * elements rather than generic `<div>`s.
+ */
+const BUTTON_NAME_RE = /(?:^|[^a-z])(button|btn|fab|cta|mainbutton)(?:[^a-z]|$)/i;
+const SWITCH_NAME_RE = /(?:^|[^a-z])(switch|toggle)(?:[^a-z]|$)/i;
+
+/** Convert "DateInput" / "date-input" / "date_input" -> "Date input". */
+function humanise(s?: string): string | undefined {
+  if (!s) return undefined;
+  return s
+    .replace(/[-_]+/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+    .replace(/^./, (c) => c.toUpperCase());
+}
+
 function tagFor(node: IRNode): string {
   const role = node.semantics?.role;
   if (role && HTML_TAG_BY_ROLE[role]) return HTML_TAG_BY_ROLE[role]!;
+  const nameHint = `${node.semantics?.componentName ?? ''} ${node.name ?? ''}`;
+  if (role === undefined) {
+    if (BUTTON_NAME_RE.test(nameHint)) return 'button';
+    if (SWITCH_NAME_RE.test(nameHint)) return 'button';
+  }
   switch (node.type) {
     case 'text':
       return 'span';
@@ -188,6 +215,11 @@ ${pageBodies[i]}
     parentLayout?: 'flex' | 'grid' | 'absolute',
     opts?: { parentDirection?: 'row' | 'column'; isRoot?: boolean },
   ): string {
+    // Drop fully-transparent nodes entirely — Figma exports frequently keep
+    // hidden helper layers at opacity 0, and rendering them (plus their whole
+    // subtree of decorative paths) produces hundreds of empty `<div>`s that
+    // clutter the preview and visually overlay real content.
+    if (node.style?.opacity === 0) return '';
     const pad = ' '.repeat(indent);
     const tag = tagFor(node);
     const className = this.classFor(node, parentLayout, opts);
@@ -203,7 +235,12 @@ ${pageBodies[i]}
       const borderNode = inputChild ?? valueChild;
       const labelText = this.escapeText(labelChild?.textStyle?.content ?? label);
       const valueText = this.escapeText(valueChild?.textStyle?.content ?? node.textStyle?.content ?? '');
-      const placeholder = this.escapeText(label || labelText);
+      // Placeholder falls back to the inferred component name when the node
+      // has no captured label text so generated `<input>`s still communicate
+      // their purpose instead of rendering as an empty rectangle. Humanise
+      // PascalCase component names (e.g. "DateInput" -> "Date Input").
+      const placeholderRaw = label || labelText || humanise(node.semantics?.componentName) || node.name || '';
+      const placeholder = this.escapeText(placeholderRaw);
       if (labelChild) {
         // 合并 border 样式到容器节点
         const wrapperNode = borderNode?.style?.border
@@ -215,12 +252,16 @@ ${pageBodies[i]}
         const inputType = label.toLowerCase().includes('email') ? 'email' : 'text';
         // 如果语义角色是 list-item，使用 <li> 包裹
         const wrapTag = node.semantics?.role === 'list-item' ? 'li' : 'div';
+        const valueAttr = valueText ? ` value="${valueText}"` : '';
+        const placeholderAttr = placeholder ? ` placeholder="${placeholder}"` : '';
         return `${pad}<${wrapTag} class="${wrapperClass}">
 ${pad}  <label class="${labelClass}">${labelText}</label>
-${pad}  <input type="${inputType}" class="${this.classForInput(node, valueChild)}" placeholder="${placeholder}" value="${valueText}" />
+${pad}  <input type="${inputType}" class="${this.classForInput(node, valueChild)}"${placeholderAttr}${valueAttr} />
 ${pad}</${wrapTag}>`;
       }
-      return `${pad}<input class="${className}" placeholder="${placeholder}" value="${valueText}" />`;
+      const valueAttr = valueText ? ` value="${valueText}"` : '';
+      const placeholderAttr = placeholder ? ` placeholder="${placeholder}"` : '';
+      return `${pad}<input class="${className}"${placeholderAttr}${valueAttr} />`;
     }
 
     if (node.type === 'image') {
