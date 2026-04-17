@@ -752,12 +752,15 @@ async function main(): Promise<void> {
     (args.format === 'fig' || (args.format === 'auto' && args.input!.endsWith('.fig')));
   if (isFigBuf) {
     const { parseFig, parseFigMultiPage, parseFigByFrames } = await import('./parser/figBinaryParser');
+    console.error(`d2c: parsing .fig binary (${(raw as Buffer).length} bytes)…`);
     if (args.splitFrames) {
       const pages = await parseFigByFrames(raw as Buffer);
+      console.error(`d2c: extracted ${pages.length} frame(s) from .fig file`);
       pipelineInput = { name: pages[0]?.name ?? 'Figma Design', pages };
       pipelineFormat = 'native';
     } else if (args.allPages) {
       const pages = await parseFigMultiPage(raw as Buffer);
+      console.error(`d2c: extracted ${pages.length} page(s) from .fig file`);
       pipelineInput = { name: pages[0]?.name ?? 'Figma Design', pages };
       pipelineFormat = 'native';
     } else {

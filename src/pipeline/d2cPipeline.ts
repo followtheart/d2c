@@ -287,7 +287,7 @@ export async function runMultiPagePipeline(
   const pageResults: PipelineResult[] = [];
   for (let i = 0; i < multiDoc.pages.length; i++) {
     const page = multiDoc.pages[i];
-    log(opts.verbose, `[multi] Processing page ${i + 1}/${multiDoc.pages.length}: ${page.name}`);
+    console.error(`d2c: [${i + 1}/${multiDoc.pages.length}] ${page.name}`);
     // 将单页面 IRDocument 包装为 raw input 再投入 pipeline
     const pageRaw = {
       name: page.name,
@@ -325,7 +325,8 @@ export async function runMultiPagePipelineWithVerification(
   const pageResults: VerifiedPipelineResult[] = [];
   for (let i = 0; i < multiDoc.pages.length; i++) {
     const page = multiDoc.pages[i];
-    log(opts.verbose, `[multi-verify] Processing page ${i + 1}/${multiDoc.pages.length}: ${page.name}`);
+    console.error(`d2c: [${i + 1}/${multiDoc.pages.length}] ${page.name}`);
+    // 将单页面 IRDocument 包装为 raw input 再投入 pipeline
     const pageRaw = {
       name: page.name,
       width: page.width,

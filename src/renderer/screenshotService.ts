@@ -47,6 +47,62 @@ async function loadPlaywright(): Promise<typeof import('playwright')> {
   }
 }
 
+// Chromium's max texture dimension is typically 16384px.  When the
+// rendered page height × deviceScaleFactor exceeds this, the browser
+// crashes or fails.  We measure the page first and pick a safe scale.
+const MAX_TEXTURE = 16384;
+
+/**
+ * Pick the highest deviceScaleFactor (up to `desired`) that keeps
+ * the rendered pixel height within Chromium's texture limit.
+ */
+function safeDpr(scrollHeight: number, scrollWidth: number, desired: number): number {
+  const maxDim = Math.max(scrollHeight, scrollWidth);
+  if (maxDim * desired <= MAX_TEXTURE) return desired;
+  const safe = Math.floor(MAX_TEXTURE / maxDim);
+  return Math.max(safe, 1);
+}
+
+/**
+ * Render a single HTML string into a browser page and capture a PNG.
+ * Launches its own browser so a crash in one job cannot affect others.
+ */
+async function screenshotWithOwnBrowser(
+  pw: typeof import('playwright'),
+  html: string,
+  outputPath: string,
+  o: Required<ScreenshotOptions>,
+): Promise<void> {
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  // First pass: load at scale 1 to measure content dimensions
+  const browser = await pw.chromium.launch();
+  try {
+    const measurePage = await browser.newPage({
+      viewport: { width: o.width, height: o.height },
+      deviceScaleFactor: 1,
+    });
+    await measurePage.setContent(html, { waitUntil: 'networkidle' });
+    const dims: { h: number; w: number } = await measurePage.evaluate(
+      '({ h: document.documentElement.scrollHeight, w: document.documentElement.scrollWidth })',
+    );
+    const dpr = safeDpr(dims.h, dims.w, o.deviceScaleFactor);
+    if (dpr === 1) {
+      // Already at scale 1 — capture directly from this page
+      await measurePage.screenshot({ path: outputPath, fullPage: o.fullPage });
+    } else {
+      await measurePage.close();
+      const page = await browser.newPage({
+        viewport: { width: o.width, height: o.height },
+        deviceScaleFactor: dpr,
+      });
+      await page.setContent(html, { waitUntil: 'networkidle' });
+      await page.screenshot({ path: outputPath, fullPage: o.fullPage });
+    }
+  } finally {
+    await browser.close();
+  }
+}
+
 /**
  * Capture a single HTML string as a PNG screenshot.
  */
@@ -57,21 +113,7 @@ export async function captureScreenshot(
 ): Promise<void> {
   const o = { ...DEFAULTS, ...opts };
   const pw = await loadPlaywright();
-  const browser = await pw.chromium.launch();
-  try {
-    const page = await browser.newPage({
-      viewport: { width: o.width, height: o.height },
-      deviceScaleFactor: o.deviceScaleFactor,
-    });
-    await page.setContent(html, { waitUntil: 'networkidle' });
-    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-    await page.screenshot({
-      path: outputPath,
-      fullPage: o.fullPage,
-    });
-  } finally {
-    await browser.close();
-  }
+  await screenshotWithOwnBrowser(pw, html, outputPath, o);
 }
 
 export interface ScreenshotJob {
@@ -80,8 +122,9 @@ export interface ScreenshotJob {
 }
 
 /**
- * Capture multiple HTML strings as PNG screenshots using a single
- * browser instance (parallel pages for speed).
+ * Capture multiple HTML strings as PNG screenshots.
+ * Each job gets its own browser instance to prevent a single crash
+ * from taking down the entire batch.
  */
 export async function captureScreenshots(
   jobs: ScreenshotJob[],
@@ -90,32 +133,7 @@ export async function captureScreenshots(
   if (jobs.length === 0) return;
   const o = { ...DEFAULTS, ...opts };
   const pw = await loadPlaywright();
-  const browser = await pw.chromium.launch();
-  try {
-    // Process pages in parallel batches of up to 4
-    const BATCH = 4;
-    for (let i = 0; i < jobs.length; i += BATCH) {
-      const batch = jobs.slice(i, i + BATCH);
-      await Promise.all(
-        batch.map(async (job) => {
-          const page = await browser.newPage({
-            viewport: { width: o.width, height: o.height },
-            deviceScaleFactor: o.deviceScaleFactor,
-          });
-          try {
-            await page.setContent(job.html, { waitUntil: 'networkidle' });
-            fs.mkdirSync(path.dirname(job.outputPath), { recursive: true });
-            await page.screenshot({
-              path: job.outputPath,
-              fullPage: o.fullPage,
-            });
-          } finally {
-            await page.close();
-          }
-        }),
-      );
-    }
-  } finally {
-    await browser.close();
+  for (const job of jobs) {
+    await screenshotWithOwnBrowser(pw, job.html, job.outputPath, o);
   }
 }
