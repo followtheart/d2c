@@ -295,6 +295,7 @@ Examples:
   d2c -i design.fig --all-pages -p react -o out/react
   d2c -i design.fig --all-pages --emit-ir out/ir/ --emit-tokens out/tokens/
   d2c -i crm.fig --split-frames -p html -o out/crm  # each top-level frame → separate page
+  d2c -i crm.fig --split-frames --verify-dir out/crm/snapshots -p html -o out/crm  # debug per-frame stages
   d2c -i design.fig --render -o out/fig-preview
   d2c -i make-decoded.json -f make -p react -o out/react
   d2c --render-snapshots snapshots/ --render-output images/
@@ -886,7 +887,8 @@ async function main(): Promise<void> {
         console.error(formatVerificationReport(page.verification));
 
         if (args.verifyDir) {
-          const pageDir = path.join(args.verifyDir, pageName);
+          const safeName = safePageName(pageName);
+          const pageDir = path.join(args.verifyDir, safeName);
           fs.mkdirSync(pageDir, { recursive: true });
           for (const snap of page.verification.snapshots) {
             const filePath = path.join(pageDir, `${snap.stage}.json`);
