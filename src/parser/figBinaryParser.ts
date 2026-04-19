@@ -589,8 +589,8 @@ function buildNodeTree(nodeChanges: KObj[]): FigDocument {
   if (docFigNode?.children) {
     for (const pageNode of docFigNode.children) {
       if (pageNode.type === 'CANVAS') {
-        // Compute relative positions for children
-        offsetChildPositions(pageNode);
+        // Figma binary transform.m02/m12 values are already parent-relative,
+        // so no coordinate conversion is needed here.
         pages.push({
           id: pageNode.id,
           name: pageNode.name,
@@ -609,16 +609,6 @@ function buildNodeTree(nodeChanges: KObj[]): FigDocument {
   }
 
   return { name: docName, pages, width, height };
-}
-
-// Convert absolute positions to parent-relative positions
-function offsetChildPositions(parent: FigNode): void {
-  if (!parent.children) return;
-  for (const child of parent.children) {
-    child.x = child.x - parent.x;
-    child.y = child.y - parent.y;
-    offsetChildPositions(child);
-  }
 }
 
 /* ── FigNode → IR Conversion ─────────────────────────────────────────── */

@@ -42,6 +42,61 @@ function humanise(s?: string): string | undefined {
     .replace(/^./, (c) => c.toUpperCase());
 }
 
+/**
+ * Detect Figma's auto-generated vector-layer names (Fill 25, Path Copy 3,
+ * Rectangle Copy 5, Group 12, Oval, Vector). These names leak into CSS
+ * classes and muddy the generated output; we fall back to semantic role /
+ * node type whenever a name matches this pattern.
+ */
+const JUNK_NAME_RE =
+  /^(fill|path|rectangle|group|oval|ellipse|vector|shape|line|star|polygon|frame|subtract|union|intersect|clip|mask)(copy)?\d*$/i;
+
+function isJunkName(s?: string): boolean {
+  if (!s) return true;
+  return JUNK_NAME_RE.test(s.replace(/[\s\-_]+/g, ''));
+}
+
+/**
+ * True when a node is effectively a decorative vector leaf — a container
+ * with no text/image, no interactive semantics, and a Figma-auto layer
+ * name (Fill, Path, Rectangle, …). Leaves that recursively contain only
+ * other such leaves also count, so an entire illustration subtree can be
+ * identified as decorative.
+ */
+function isDecorativeVectorSubtree(node: IRNode): boolean {
+  // Allow `list`/`list-item` types: the semantic enhancer's repeating-
+  // sibling heuristic occasionally misfires on clusters of vector paths
+  // (e.g. a bar chart built from four `Path` siblings). When the layer
+  // name is clearly Figma-auto-generated we treat the misfired role as
+  // noise and still collapse the subtree.
+  if (node.type !== 'container' && node.type !== 'list' && node.type !== 'list-item') return false;
+  if (node.textStyle || node.assetRef) return false;
+  if (node.semantics?.interactive) return false;
+  if (!isJunkName(node.name)) return false;
+  return node.children.every(isDecorativeVectorSubtree);
+}
+
+/**
+ * True when `node` is an illustration-like container (named "Illustration"
+ * / "Graphic" / "EmptyState" / etc.) whose entire descendant subtree is
+ * decorative vector paths. Rendering every path as a `<div>` produces
+ * hundreds of empty boxes with ugly class names like `d2c-fill25-1170`;
+ * collapsing them into a single aria-labelled placeholder keeps the
+ * generated HTML readable without losing meaning.
+ */
+const ILLUSTRATION_NAME_RE =
+  /illustration|graphic|ornament|decor|pattern|empty.?state.*illustration/i;
+
+function isDecorativeIllustration(node: IRNode): boolean {
+  if (node.type !== 'container') return false;
+  if (node.children.length < 4) return false;
+  if (node.textStyle || node.assetRef) return false;
+  if (node.semantics?.interactive) return false;
+  const nameish = `${node.semantics?.componentName ?? ''} ${node.name ?? ''}`;
+  if (!ILLUSTRATION_NAME_RE.test(nameish)) return false;
+  return node.children.every(isDecorativeVectorSubtree);
+}
+
 function tagFor(node: IRNode): string {
   const role = node.semantics?.role;
   if (role && HTML_TAG_BY_ROLE[role]) return HTML_TAG_BY_ROLE[role]!;
@@ -181,7 +236,15 @@ ${pageBodies[i]}
     const props = buildCssProps(node, parentLayout, opts);
     const key = JSON.stringify(props);
     if (this.classIndex.has(key)) return this.classIndex.get(key)!;
-    const base = kebabCase(node.semantics?.componentName || node.name || node.type);
+    // Pick a human-readable slug for the class name, but skip Figma's auto
+    // layer names (Fill 25, Path Copy 3, Rectangle, …) so CSS classes stay
+    // semantic rather than echoing design-tool scaffolding.
+    const candidate = !isJunkName(node.semantics?.componentName)
+      ? node.semantics?.componentName
+      : !isJunkName(node.name)
+        ? node.name
+        : node.semantics?.role ?? node.type;
+    const base = kebabCase(candidate || node.type);
     const name = `d2c-${base}-${++this.classCounter}`;
     this.classIndex.set(key, name);
     this.classCss.push(`.${name} {\n${cssPropsToBlock(props, 2)}\n}`);
@@ -221,6 +284,18 @@ ${pageBodies[i]}
     // clutter the preview and visually overlay real content.
     if (node.style?.opacity === 0) return '';
     const pad = ' '.repeat(indent);
+
+    // Collapse Figma illustration subtrees — rendering every vector path as
+    // a nested `<div>` produces hundreds of empty boxes that clutter the
+    // preview. A single aria-labelled placeholder preserves bounds and
+    // semantic intent without the noise.
+    if (isDecorativeIllustration(node)) {
+      const leafNode: IRNode = { ...node, children: [] };
+      const leafClass = this.classFor(leafNode, parentLayout, opts);
+      const alt = this.escapeText(node.semantics?.ariaLabel ?? node.name ?? 'illustration');
+      return `${pad}<div class="${leafClass}" role="img" aria-label="${alt}"></div>`;
+    }
+
     const tag = tagFor(node);
     const className = this.classFor(node, parentLayout, opts);
 
