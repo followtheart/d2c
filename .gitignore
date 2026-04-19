@@ -6,3 +6,5 @@ out/
 .env
 .env.local
 .d2crc.json
+scripts/
+.claude/
