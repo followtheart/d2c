@@ -489,7 +489,16 @@ function nodeChangeToFigNode(nc: KObj): FigNode {
     node.fontWeight = fontName?.style ? fontWeightFromStyle(str(fontName.style)) : 400;
     if (nc.lineHeight !== undefined) {
       const lh = nc.lineHeight as KObj;
-      if (lh.value !== undefined) node.lineHeightPx = num(lh.value);
+      const lhUnits = str(lh.units);
+      if (lhUnits === 'PERCENT') {
+        // Convert percentage to pixels: fontSize × (value / 100)
+        const fs = nc.fontSize !== undefined ? num(nc.fontSize) : 14;
+        node.lineHeightPx = Math.round(fs * num(lh.value) / 100);
+      } else if (lhUnits === 'AUTO' || lhUnits === 'auto') {
+        // Auto line-height: omit to let browser use default
+      } else if (lh.value !== undefined) {
+        node.lineHeightPx = num(lh.value);
+      }
     }
     if (nc.letterSpacing !== undefined) {
       const ls = nc.letterSpacing as KObj;
@@ -727,13 +736,20 @@ function extractIRBox(node: FigNode): Box {
 function figNodeToIR(node: FigNode): IRNode {
   const type = mapNodeType(node);
   const assetRef = node.fills?.find((f) => f.type === 'IMAGE')?.imageRef;
+  const style = extractIRStyle(node);
+  // Text nodes: the fill represents text color, not a background.
+  // Remove the spurious backgroundColor so generated CSS doesn't paint
+  // a solid rectangle behind every text element.
+  if (type === 'text' && style.backgroundColor) {
+    delete style.backgroundColor;
+  }
   return {
     id: node.id,
     name: node.name,
     type,
     box: extractIRBox(node),
     layout: extractIRLayout(node),
-    style: extractIRStyle(node),
+    style,
     textStyle: extractIRTextStyle(node),
     assetRef,
     children: (node.children ?? [])
@@ -746,6 +762,10 @@ function pageToIRDocument(page: FigPage, docName: string, defaultWidth: number, 
   let rootNode: IRNode;
   if (page.children.length === 1) {
     rootNode = figNodeToIR(page.children[0]);
+    // Normalize root frame position to (0,0) — the canvas offset
+    // is irrelevant for code generation.
+    rootNode.box.x = 0;
+    rootNode.box.y = 0;
   } else if (page.children.length > 1) {
     const maxW = Math.max(...page.children.map((c) => c.x + c.width), defaultWidth);
     const maxH = Math.max(...page.children.map((c) => c.y + c.height), defaultHeight);
@@ -842,6 +862,10 @@ function frameToIRDocument(frame: FigNode, pageName: string): IRDocument {
   const width = frame.width || 1440;
   const height = frame.height || 900;
   const rootNode = figNodeToIR(frame);
+  // Normalize root frame position to (0,0) — the canvas offset
+  // is irrelevant for code generation.
+  rootNode.box.x = 0;
+  rootNode.box.y = 0;
   const ir: IRDocument = {
     name: frame.name || pageName,
     width,

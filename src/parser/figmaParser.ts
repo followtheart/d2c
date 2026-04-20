@@ -232,13 +232,18 @@ function extractBox(figma: FigmaNode, parent?: FigmaNode): Box {
 function toIRNode(figma: FigmaNode, parent?: FigmaNode): IRNode {
   const type = mapType(figma);
   const assetRef = (figma.fills ?? []).find((f) => f.type === 'IMAGE')?.imageRef;
+  const style = extractStyle(figma);
+  // Text nodes: the fill represents text color, not a background.
+  if (type === 'text' && style.backgroundColor) {
+    delete style.backgroundColor;
+  }
   const node: IRNode = {
     id: figma.id,
     name: figma.name,
     type,
     box: extractBox(figma, parent),
     layout: extractLayout(figma),
-    style: extractStyle(figma),
+    style,
     textStyle: extractTextStyle(figma),
     assetRef,
     children: (figma.children ?? [])
