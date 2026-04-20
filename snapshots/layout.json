@@ -1,0 +1,66 @@
+{
+  "stage": "layout",
+  "durationMs": 8,
+  "checks": [
+    { "level": "pass", "rule": "layout.flex", "message": "flex OK" }
+  ],
+  "ir": {
+    "name": "25-My-Account",
+    "width": 375,
+    "height": 812,
+    "root": {
+      "id": "root",
+      "name": "25-My-Account",
+      "type": "container",
+      "box": { "x": 0, "y": 0, "width": 375, "height": 812 },
+      "layout": { "type": "flex", "direction": "column", "gap": 0 },
+      "style": { "backgroundColor": "#f8fafc" },
+      "children": [
+        {
+          "id": "header",
+          "name": "Header",
+          "type": "container",
+          "box": { "x": 0, "y": 0, "width": 375, "height": 56 },
+          "layout": { "type": "flex", "direction": "row", "justifyContent": "space-between", "alignItems": "center" },
+          "style": { "backgroundColor": "#ffffff" },
+          "children": [
+            {
+              "id": "title",
+              "name": "My Account",
+              "type": "text",
+              "box": { "x": 16, "y": 16, "width": 200, "height": 24 },
+              "layout": { "type": "absolute" },
+              "style": {},
+              "children": [],
+              "textStyle": {
+                "content": "My Account",
+                "fontSize": 18,
+                "fontWeight": 700,
+                "color": "#1e293b"
+              }
+            }
+          ]
+        },
+        {
+          "id": "avatar-card",
+          "name": "Avatar Card",
+          "type": "container",
+          "box": { "x": 16, "y": 72, "width": 343, "height": 96 },
+          "layout": { "type": "flex", "direction": "row", "alignItems": "center", "gap": 12 },
+          "style": { "backgroundColor": "#ffffff", "borderRadius": 12 },
+          "children": [
+            {
+              "id": "avatar",
+              "name": "Avatar",
+              "type": "image",
+              "box": { "x": 0, "y": 0, "width": 64, "height": 64 },
+              "layout": { "type": "absolute" },
+              "style": { "borderRadius": 32 },
+              "children": []
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
