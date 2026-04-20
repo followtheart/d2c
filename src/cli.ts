@@ -20,7 +20,7 @@ import {
   type NodeLlmProviderName,
 } from './ai/nodeLlmProvider';
 import type { LLMProvider } from './ai/semanticEnhancer';
-import { loadConfig, resolveApiKey, type D2CConfig } from './config';
+import { loadConfig, resolveApiKey, resolveFigmaToken, type D2CConfig } from './config';
 
 interface Args {
   input?: string;
@@ -67,6 +67,18 @@ interface Args {
   visionProvider?: 'openrouter' | 'anthropic' | 'zhipuai' | 'dashscope';
   /** Vision model id override. */
   visionModel?: string;
+  /** Figma API: personal access token or OAuth2 token. */
+  figmaToken?: string;
+  /** Figma API: file key or URL to fetch. */
+  figmaFileKey?: string;
+  /** Figma API: node IDs to fetch/render (comma-separated). */
+  figmaNodeIds?: string;
+  /** Figma API: export images instead of parsing file JSON. */
+  figmaExportImages?: boolean;
+  /** Figma API: export format (png/jpg/svg/pdf). */
+  figmaExportFormat?: 'png' | 'jpg' | 'svg' | 'pdf';
+  /** Figma API: export scale (0.01–4). */
+  figmaExportScale?: number;
   /** Run the ground-truth-anchored fidelity comparison (Figma ↔ codegen). */
   compareFidelity?: boolean;
   /** Path to the reference rendering PNG (Figma export / Sketch preview). */
@@ -218,6 +230,26 @@ function parseArgs(argv: string[]): Args {
       case '--fidelity-use-llm':
         args.fidelityUseLlm = true;
         break;
+      case '--figma-token':
+        args.figmaToken = next();
+        break;
+      case '--figma-file-key':
+        args.figmaFileKey = next();
+        break;
+      case '--figma-node-ids':
+        args.figmaNodeIds = next();
+        break;
+      case '--figma-export-images':
+        args.figmaExportImages = true;
+        break;
+      case '--figma-export-format':
+        args.figmaExportFormat = next() as 'png' | 'jpg' | 'svg' | 'pdf';
+        break;
+      case '--figma-export-scale': {
+        const s = next();
+        args.figmaExportScale = parseFloat(s);
+        break;
+      }
       case '--verbose':
       case '-v':
         args.verbose = true;
@@ -322,6 +354,19 @@ Options:
                                  (heatmap, aligned PNGs).
       --fidelity-use-llm           Also run the 6-dim LLM perceptual
                                  judgment (needs --vision-provider).
+      --figma-token <token>         Figma personal access token (or set
+                                 FIGMA_TOKEN env var, or figmaToken in
+                                 .d2crc.json).
+      --figma-file-key <key|url>   Figma file key or URL. Fetches the file
+                                 via the REST API instead of reading a
+                                 local file.
+      --figma-node-ids <ids>       Comma-separated Figma node IDs to
+                                 fetch/render.
+      --figma-export-images        Export images from Figma's servers
+                                 instead of parsing the file JSON.
+      --figma-export-format <fmt>  Export format: png | jpg | svg | pdf
+                                 (default: png).
+      --figma-export-scale <n>     Export scale factor 0.01–4 (default: 2).
       --render                     Render the design visually (SVG / HTML)
                                  instead of generating code. Implies
                                  --format sketch (or auto-detected).
@@ -364,6 +409,11 @@ Examples:
   d2c --compare-fidelity --reference-image figma.png --candidate-image codegen.png \\
       --fidelity-ir ir.json --fidelity-report report.md \\
       --fidelity-diagnostics-dir out/fidelity
+  FIGMA_TOKEN=... d2c --figma-file-key abc123 -p react -o out/react
+  FIGMA_TOKEN=... d2c --figma-file-key abc123 --render -o out/preview
+  FIGMA_TOKEN=... d2c --figma-file-key abc123 --figma-export-images -o out/images
+  FIGMA_TOKEN=... d2c --figma-file-key abc123 --figma-export-images --figma-export-format svg -o out/svg
+  FIGMA_TOKEN=... d2c --figma-file-key abc123 --figma-node-ids 1:2,1:3 --figma-export-images -o out/nodes
 `;
 
 /**
@@ -664,6 +714,223 @@ async function renderSnapshotsCommand(args: Args): Promise<void> {
   }
 }
 
+/**
+ * Figma REST API mode: fetch file via API and either generate code or export images.
+ */
+async function figmaApiCommand(args: Args): Promise<void> {
+  const config = loadConfig();
+  const token = args.figmaToken ?? resolveFigmaToken(config);
+  if (!token) {
+    console.error(
+      'ERROR: --figma-file-key requires a Figma token.\n' +
+      'Set FIGMA_TOKEN env var, use --figma-token <token>, or add figmaToken to .d2crc.json.',
+    );
+    process.exit(2);
+  }
+
+  const { fetchFigmaFile, exportFigmaImages } = await import('./api/figmaApiRenderer');
+  const apiConfig = {
+    token,
+    baseUrl: config.figmaBaseUrl,
+    fileKey: args.figmaFileKey!,
+    nodeIds: args.figmaNodeIds,
+  };
+
+  const out = args.out ?? '-';
+  const log = (msg: string) => console.error(`d2c figma-api: ${msg}`);
+
+  // ── Image export mode ──────────────────────────────────────────────
+  if (args.figmaExportImages) {
+    const nodeIds = args.figmaNodeIds?.split(',').map((s) => s.trim()).filter(Boolean);
+    const result = await exportFigmaImages(
+      apiConfig,
+      {
+        nodeIds,
+        format: args.figmaExportFormat ?? 'png',
+        scale: args.figmaExportScale ?? 2,
+      },
+      log,
+    );
+
+    if (out === '-') {
+      console.log(result.html);
+    } else {
+      fs.mkdirSync(out, { recursive: true });
+      // Write HTML preview
+      const htmlPath = path.join(out, 'preview.html');
+      fs.writeFileSync(htmlPath, result.html);
+      log(`wrote ${htmlPath}`);
+      // Write individual images
+      const ext = args.figmaExportFormat ?? 'png';
+      for (const [nodeId, buf] of result.imageBuffers) {
+        const safeName = nodeId.replace(/[^a-zA-Z0-9_-]/g, '_');
+        const imgPath = path.join(out, `${safeName}.${ext}`);
+        fs.writeFileSync(imgPath, buf);
+        if (args.verbose) log(`wrote ${imgPath}`);
+      }
+      log(`exported ${result.imageBuffers.size} image(s) → ${out}`);
+    }
+    return;
+  }
+
+  // ── Fetch file and run pipeline (code generation) ──────────────────
+  const fetchResult = await fetchFigmaFile(apiConfig, log);
+
+  // Render-only mode: produce HTML/SVG from IR
+  if (args.render) {
+    const renderer = await import('./renderer');
+    const { toFigDocument } = await import('./api/figmaApiRenderer');
+    const scale = args.renderScale ?? 1;
+    const format = args.renderFormat ?? 'html';
+
+    const figDoc = toFigDocument(fetchResult.fileResponse, fetchResult.imageFills);
+    const result = renderer.renderFig(figDoc, { scale });
+
+    if (format === 'html') {
+      if (out === '-') {
+        console.log(result.html);
+      } else {
+        fs.mkdirSync(out, { recursive: true });
+        const htmlPath = path.join(out, 'preview.html');
+        fs.writeFileSync(htmlPath, result.html);
+        log(`wrote ${htmlPath}`);
+      }
+    } else {
+      if (out === '-') {
+        for (const [name, svg] of result.svgs) {
+          console.log(`<!-- ===== ${name} ===== -->`);
+          console.log(svg);
+        }
+      } else {
+        fs.mkdirSync(out, { recursive: true });
+        for (const [name, svg] of result.svgs) {
+          const safeName = name.replace(/[^a-zA-Z0-9_-]/g, '_');
+          const svgPath = path.join(out, `${safeName}.svg`);
+          fs.writeFileSync(svgPath, svg);
+          if (args.verbose) log(`wrote ${svgPath}`);
+        }
+        log(`wrote ${result.svgs.size} SVG file(s) → ${out}`);
+      }
+    }
+    return;
+  }
+
+  // ── Pipeline mode: parse IR → codegen ──────────────────────────────
+  const effectiveProvider = args.llmProvider ?? config.llm?.provider;
+  const effectiveModel = args.llmModel ?? config.llm?.model;
+  const effectiveBaseUrl = args.llmBaseUrl ?? config.llm?.baseUrl;
+
+  let llm: LLMProvider | undefined;
+  if (!args.noLlm && args.useClaude) {
+    const apiKey = resolveApiKey('anthropic', 'ANTHROPIC_API_KEY', config);
+    if (!apiKey) {
+      console.error('ERROR: --use-claude requires ANTHROPIC_API_KEY.');
+      process.exit(2);
+    }
+    llm = new ClaudeProvider({ apiKey });
+  } else if (!args.noLlm && effectiveProvider) {
+    const apiKey = pickApiKey(effectiveProvider, config);
+    if (!apiKey && effectiveProvider !== 'ollama') {
+      console.error(`ERROR: --llm-provider ${effectiveProvider} requires the matching API key.`);
+      process.exit(2);
+    }
+    llm = new NodeLlmProvider({
+      provider: effectiveProvider,
+      model: effectiveModel,
+      apiKey,
+      baseUrl: effectiveBaseUrl,
+    });
+  }
+
+  // Use the already-parsed IR as native input to the pipeline
+  const pipelineInput = args.allPages
+    ? { name: fetchResult.pages[0]?.name ?? 'Figma Design', pages: fetchResult.pages }
+    : { name: fetchResult.ir.name, width: fetchResult.ir.width, height: fetchResult.ir.height, root: fetchResult.ir.root };
+
+  const { parseDesign } = await import('./parser');
+  const { inferLayout } = await import('./layout/inference');
+  const responsiveVariants = args.responsive.map((r) => {
+    const variantRaw = JSON.parse(fs.readFileSync(r.file, 'utf8'));
+    const parsed = parseDesign(variantRaw, args.format);
+    return {
+      breakpoint: r.breakpoint,
+      doc: { ...parsed, root: inferLayout(parsed.root) },
+    };
+  });
+
+  let previousIR;
+  if (args.prevIR) {
+    previousIR = JSON.parse(fs.readFileSync(args.prevIR, 'utf8'));
+  }
+
+  const pipelineOpts = {
+    format: 'native' as DesignFormat,
+    platform: args.platform,
+    verbose: args.verbose,
+    llm,
+    componentLibrary: args.componentLibrary,
+    responsiveVariants,
+    previousIR,
+    computeDiff: !!args.emitDiff,
+  };
+
+  if (args.allPages) {
+    const multiResult = args.verify
+      ? await runMultiPagePipelineWithVerification(pipelineInput, pipelineOpts)
+      : await runMultiPagePipeline(pipelineInput, pipelineOpts);
+    const { generated } = multiResult;
+    if (out === '-') {
+      for (const file of generated.files) {
+        console.log(`// ===== ${file.path} =====`);
+        console.log(file.content);
+      }
+    } else {
+      fs.mkdirSync(out, { recursive: true });
+      for (const file of generated.files) {
+        const full = path.join(out, file.path);
+        fs.mkdirSync(path.dirname(full), { recursive: true });
+        fs.writeFileSync(full, file.content);
+        if (args.verbose) log(`wrote ${full}`);
+      }
+      log(`generated ${generated.files.length} file(s) for ${multiResult.pages.length} page(s) → ${out}`);
+    }
+  } else {
+    const result = args.verify
+      ? await runPipelineWithVerification(pipelineInput, pipelineOpts)
+      : await runPipeline(pipelineInput, pipelineOpts);
+    const { ir, generated, styleDictionary, tailwindPreset, diff } = result;
+
+    if (args.emitIR) {
+      writeFile(args.emitIR, JSON.stringify(ir, null, 2));
+      if (args.verbose) log(`IR written to ${args.emitIR}`);
+    }
+    if (args.emitTokens) {
+      writeFile(args.emitTokens, JSON.stringify(styleDictionary, null, 2));
+    }
+    if (args.emitTailwind) {
+      writeFile(args.emitTailwind, tailwindPreset);
+    }
+    if (args.emitDiff && diff) {
+      writeFile(args.emitDiff, JSON.stringify(diff, null, 2));
+    }
+    if (out === '-') {
+      for (const file of generated.files) {
+        console.log(`// ===== ${file.path} =====`);
+        console.log(file.content);
+      }
+    } else {
+      fs.mkdirSync(out, { recursive: true });
+      for (const file of generated.files) {
+        const full = path.join(out, file.path);
+        fs.mkdirSync(path.dirname(full), { recursive: true });
+        fs.writeFileSync(full, file.content);
+        if (args.verbose) log(`wrote ${full}`);
+      }
+      log(`generated ${generated.files.length} file(s) → ${out} (entry: ${generated.entryFile})`);
+    }
+  }
+}
+
 async function main(): Promise<void> {
   let args: Args;
   try {
@@ -677,6 +944,7 @@ async function main(): Promise<void> {
   if (
     args.help ||
     (!args.input &&
+      !args.figmaFileKey &&
       !args.renderSnapshots &&
       !args.compareStages &&
       !args.compareFidelity)
@@ -686,7 +954,7 @@ async function main(): Promise<void> {
   }
 
   // ─── Standalone modes (no --input required) ─────────────────────
-  if (!args.input) {
+  if (!args.input && !args.figmaFileKey) {
     if (args.renderSnapshots) {
       await renderSnapshotsCommand(args);
     }
@@ -696,6 +964,12 @@ async function main(): Promise<void> {
     if (args.compareFidelity) {
       await compareFidelityCommand(args);
     }
+    return;
+  }
+
+  // ─── Figma REST API mode (--figma-file-key) ─────────────────────
+  if (args.figmaFileKey) {
+    await figmaApiCommand(args);
     return;
   }
 

@@ -34,6 +34,15 @@ export interface D2CConfig {
     model?: string;
     baseUrl?: string;
   };
+  // Figma personal access token (or set FIGMA_TOKEN env var)
+  figmaToken?: string;
+  // Figma API base URL override (default: https://api.figma.com)
+  figmaBaseUrl?: string;
+}
+
+// Resolve Figma API token: env var → config file.
+export function resolveFigmaToken(config: D2CConfig): string | undefined {
+  return process.env.FIGMA_TOKEN ?? config.figmaToken;
 }
 
 const CONFIG_FILENAME = '.d2crc.json';

@@ -7,7 +7,7 @@ simpler "native" design JSON) into working **React + Tailwind**,
 — with design-token extraction, Tailwind preset generation, antd / MUI
 component matching, responsive breakpoint inference, protected
 `// ai:ignore` regions for safe regeneration, **高保真 `.fig` 渲染引擎**,
-**阶段快照可视化**, 以及 **多模态 LLM 阶段比对分析**。
+**Figma REST API 集成**, **阶段快照可视化**, 以及 **多模态 LLM 阶段比对分析**。
 
 Based on the architecture described in [`doc/opus4.6.md`](doc/opus4.6.md) and
 [`doc/qwen3.6.md`](doc/qwen3.6.md):
@@ -148,6 +148,12 @@ DEEPSEEK_API_KEY=sk-... node dist/cli.js \
       --render                   Render the design visually (SVG / HTML)
       --render-format <fmt>      Render output format: svg | html
       --render-scale <n>         Scale factor for rendered output
+      --figma-token <token>      Figma personal access token (or FIGMA_TOKEN)
+      --figma-file-key <key>     Figma file key or full URL to fetch via API
+      --figma-node-ids <ids>     Comma-separated node IDs to fetch/export
+      --figma-export-images      Export images via Figma server-side rendering
+      --figma-export-format <f>  Export format: png | jpg | svg | pdf
+      --figma-export-scale <n>   Export scale (0.01–4, default: 2)
   -v, --verbose                  Verbose logging
   -h, --help                     Show this help
 ```
@@ -202,6 +208,25 @@ node dist/cli.js --compare-stages --render-output img/ --compare-report report.m
 # Use Anthropic as the vision backend
 ANTHROPIC_API_KEY=... node dist/cli.js --compare-stages --render-output img/ \
     --vision-provider anthropic --compare-report report.json
+
+# ── Figma REST API ─────────────────────────────────────────────────
+# Fetch a Figma cloud file → React code
+node dist/cli.js --figma-file-key abc123DEF --figma-token figd_xxx \
+    -p react -o out/figma-react
+
+# Figma URL also works as file key
+node dist/cli.js --figma-file-key https://www.figma.com/design/abc123DEF/MyFile \
+    -p react -o out/figma-react
+
+# Export specific nodes as PNG from Figma servers
+node dist/cli.js --figma-file-key abc123DEF --figma-export-images \
+    --figma-node-ids "1:2,3:4" --figma-export-format png -o out/images
+
+# Render Figma cloud file as HTML preview (no code generation)
+node dist/cli.js --figma-file-key abc123DEF --render --render-format html -o out/preview
+
+# Use .d2crc.json for token (figmaToken field)
+node dist/cli.js --figma-file-key abc123DEF -p vue -o out/vue
 ```
 
 ## LLM API Token 配置
@@ -238,7 +263,8 @@ d2c 会按以下顺序查找配置文件（找到第一个即停止）：
     "provider": "siliconflow",
     "model": "Pro/moonshotai/Kimi-K2.5",
     "baseUrl": "https://custom-gateway.example.com/v1"
-  }
+  },
+  "figmaToken": "figd_xxxxxxxxxxxxxxxxxxxx"
 }
 ```
 
@@ -248,6 +274,7 @@ d2c 会按以下顺序查找配置文件（找到第一个即停止）：
 | `llm.provider` | 默认 LLM 供应商（可被 `--llm-provider` 覆盖） |
 | `llm.model` | 默认模型 id（可被 `--llm-model` 覆盖） |
 | `llm.baseUrl` | 默认端点 URL（可被 `--llm-base-url` 覆盖） |
+| `figmaToken` | Figma 个人访问令牌（可被 `--figma-token` 或 `FIGMA_TOKEN` 环境变量覆盖） |
 
 > `siliconflow` 按 OpenAI 兼容接口接入；未显式指定 `llm.baseUrl` 时默认使用 `https://api.siliconflow.cn/v1`。
 
@@ -446,6 +473,84 @@ Given absolute coordinates and sizes, the inference engine (`src/layout/inferenc
    - Users can also plug in any custom backend (Qwen-VL, local vLLM, etc.) by
      implementing the one-method `LLMProvider` interface.
 
+## Figma REST API 集成
+
+d2c 支持通过 **Figma REST API** 直接从 Figma 云端获取设计文件并生成代码，
+无需手动导出 JSON 或下载 `.fig` 文件。
+
+### Token 配置
+
+Figma API 需要一个个人访问令牌（Personal Access Token），支持三种配置方式
+（按优先级从高到低）：
+
+1. CLI 参数：`--figma-token figd_xxx`
+2. 环境变量：`FIGMA_TOKEN=figd_xxx`
+3. 配置文件：`.d2crc.json` 中的 `figmaToken` 字段
+
+### 功能说明
+
+| 模式 | 说明 | 关键参数 |
+|------|------|----------|
+| **代码生成** | 获取文件 JSON → 解析为 IR → 运行流水线 → 输出代码 | `--figma-file-key` + `-p react` |
+| **HTML/SVG 预览** | 获取文件 JSON → 渲染为可视化预览 | `--figma-file-key` + `--render` |
+| **图片导出** | 调用 Figma 服务端渲染接口导出节点为图片 | `--figma-export-images` |
+
+### CLI 使用
+
+```bash
+# 从 Figma 云端文件生成 React 代码
+node dist/cli.js --figma-file-key abc123DEF -p react -o out/figma-react
+
+# 支持完整 Figma URL
+node dist/cli.js --figma-file-key https://www.figma.com/design/abc123DEF/MyFile \
+    -p react -o out/figma-react
+
+# 仅获取特定节点
+node dist/cli.js --figma-file-key abc123DEF --figma-node-ids "1:2,3:4" \
+    -p react -o out/nodes
+
+# 多页面模式
+node dist/cli.js --figma-file-key abc123DEF --all-pages -p react -o out/all
+
+# 渲染为 HTML 预览（不生成代码）
+node dist/cli.js --figma-file-key abc123DEF --render --render-format html -o out/preview
+
+# 通过 Figma 服务端导出节点为 PNG
+node dist/cli.js --figma-file-key abc123DEF --figma-export-images \
+    --figma-node-ids "1:2,3:4" --figma-export-format png --figma-export-scale 2 \
+    -o out/images
+
+# 导出为 SVG
+node dist/cli.js --figma-file-key abc123DEF --figma-export-images \
+    --figma-export-format svg -o out/svgs
+```
+
+### 作为库使用
+
+```ts
+import { FigmaApiClient, fetchFigmaFile, exportFigmaImages, extractFileKey } from 'd2c';
+
+// 从 URL 提取 file key
+const fileKey = extractFileKey('https://www.figma.com/design/abc123DEF/MyFile');
+
+// 获取文件并解析为 IR
+const result = await fetchFigmaFile({
+  token: process.env.FIGMA_TOKEN!,
+  fileKey: fileKey!,
+});
+console.log(result.ir.name, result.pages.length);
+
+// 导出指定节点为图片
+const images = await exportFigmaImages(
+  { token: process.env.FIGMA_TOKEN!, fileKey: fileKey! },
+  { nodeIds: ['1:2', '3:4'], format: 'png', scale: 2 },
+);
+console.log(`exported ${images.imageBuffers.size} image(s)`);
+```
+
+> **注意：** Figma REST API 仅支持**云端文件**。本地 `.fig` 二进制文件请使用
+> `.fig` 渲染引擎（`--input design.fig`），二者互补、不冲突。
+
 ## `.fig` 高保真渲染引擎
 
 d2c 支持**直接渲染 Figma 原生 `.fig` 二进制文件**为可视化的 SVG / HTML 预览。
@@ -640,12 +745,15 @@ Mapped to the phases described in the design docs:
       视觉后端，自动两两比较相邻阶段渲染结果并生成 Markdown / HTML / JSON 报告。
 - [x] **P6**: `.fig` 高保真渲染引擎 — Figma 原生二进制文件直接渲染为 SVG / HTML
       预览，保留渐变、旋转、四角圆角、内阴影 / 模糊、真实图片填充、多画板。
+- [x] **P7**: Figma REST API 集成 — 通过 Figma API 直接从云端获取设计文件，
+      支持文件解析→代码生成、HTML/SVG 预览、服务端图片导出三种模式。
 
 ## Directory layout
 
 ```
 src/
 ├── ir/            # Intermediate representation types & runtime validation
+├── api/           # Figma REST API client + API renderer
 ├── parser/        # Figma REST + .fig binary + Figma Make + Sketch + native parsers
 ├── layout/        # Deterministic layout inference + responsive merge
 ├── ai/            # Rule-based + optional LLM semantic enhancer +

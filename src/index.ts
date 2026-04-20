@@ -71,8 +71,27 @@ export type {
   ComparisonReport,
 } from './pipeline/stageCompare';
 export { reportToMarkdown, reportToHtml, reportToJson } from './pipeline/compareReport';
-export { loadConfig, resolveApiKey } from './config';
+export { loadConfig, resolveApiKey, resolveFigmaToken } from './config';
 export type { D2CConfig } from './config';
+export { FigmaApiClient, extractFileKey, collectImageRefs } from './api/figmaApi';
+export type {
+  FigmaApiConfig,
+  GetFileOptions,
+  GetFileNodesOptions,
+  GetImageOptions,
+  ImageFormat,
+  FigmaFileResponse as ApiFigmaFileResponse,
+  FigmaImageResponse,
+  FigmaImageFillsResponse,
+  FigmaFileNodesResponse,
+} from './api/figmaApi';
+export { fetchFigmaFile, exportFigmaImages } from './api/figmaApiRenderer';
+export type {
+  FigmaApiRenderConfig,
+  FigmaApiFetchResult,
+  FigmaApiImageExportOptions,
+  FigmaApiImageExportResult,
+} from './api/figmaApiRenderer';
 export {
   renderSketch,
   buildRenderTree,
