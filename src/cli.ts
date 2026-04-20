@@ -714,17 +714,9 @@ async function main(): Promise<void> {
     if (isFigFile) {
       const { parseFigBinary } = await import('./parser/figBinaryParser');
       const figDoc = await parseFigBinary(raw as Buffer);
-      // Convert to MakeDocument-compatible shape for rendering
-      const { parseMakeJsonToMakeDoc } = await import('./parser/makeParser');
-      const nodes = figDoc.pages.flatMap((p) => p.children);
-      const makeDoc = parseMakeJsonToMakeDoc({
-        name: figDoc.name,
-        nodes,
-        codeFiles: [],
-        width: figDoc.width,
-        height: figDoc.height,
-      });
-      const result = renderer.renderMake(makeDoc, { scale });
+      // Direct .fig → RenderDocument path (preserves gradients, rotation,
+      // image assets, rich effects, per-corner radii).
+      const result = renderer.renderFig(figDoc, { scale });
 
       if (format === 'html') {
         if (out === '-') {

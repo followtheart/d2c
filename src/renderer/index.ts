@@ -39,6 +39,9 @@ export { buildMakeRenderTree } from './makeRenderTree';
 export type { MakeRenderOptions, MakeRenderResult } from './makeRenderTree';
 export { renderMakeHtmlPreview } from './makeHtmlPreview';
 
+export { buildFigRenderTree } from './figRenderTree';
+export type { FigRenderOptions, FigRenderResult } from './figRenderTree';
+
 // ── Snapshot stage renderers ────────────────────────────────────────
 export type { SnapshotRenderer } from './snapshotRenderer';
 export { parseRenderer } from './parseRenderer';
@@ -62,6 +65,9 @@ import { buildMakeRenderTree } from './makeRenderTree';
 import type { MakeRenderOptions } from './makeRenderTree';
 import { renderMakeHtmlPreview } from './makeHtmlPreview';
 import type { MakeDocument } from '../parser/makeParser';
+import { buildFigRenderTree } from './figRenderTree';
+import type { FigRenderOptions } from './figRenderTree';
+import type { FigDocument } from '../parser/figBinaryParser';
 
 export interface SketchRenderResult {
   /** The parsed render tree */
@@ -158,4 +164,40 @@ export function renderMake(
   const svgs = renderDocumentToSvg(renderDoc.artboards, options);
   const html = renderMakeHtmlPreview(renderDoc, codeFiles, options);
   return { renderDoc, svgs, html, codeFiles };
+}
+
+/* ── Figma (.fig) Renderer ───────────────────────────────────────────── */
+
+export interface FigRenderFullResult {
+  /** The built render tree (one artboard per top-level frame). */
+  renderDoc: RenderDocument;
+  /** SVG string per artboard, keyed by artboard name. */
+  svgs: Map<string, string>;
+  /** Interactive standalone HTML preview. */
+  html: string;
+}
+
+/**
+ * One-shot render: FigDocument → render tree → SVG + HTML preview.
+ *
+ * The FigDocument is expected to come from `parseFigBinary()`.  Image fills
+ * are resolved against the document's embedded images map, so the preview
+ * shows real raster assets rather than placeholders.
+ *
+ * Usage:
+ *   import { parseFigBinary } from 'd2c/parser/figBinaryParser';
+ *   import { renderFig } from 'd2c/renderer';
+ *
+ *   const figDoc = await parseFigBinary(fs.readFileSync('design.fig'));
+ *   const { html, svgs } = renderFig(figDoc);
+ *   fs.writeFileSync('preview.html', html);
+ */
+export function renderFig(
+  figDoc: FigDocument,
+  options?: FigRenderOptions,
+): FigRenderFullResult {
+  const { renderDoc } = buildFigRenderTree(figDoc, options);
+  const svgs = renderDocumentToSvg(renderDoc.artboards, options);
+  const html = renderToHtmlPreview(renderDoc, options);
+  return { renderDoc, svgs, html };
 }

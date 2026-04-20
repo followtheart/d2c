@@ -246,6 +246,8 @@ function isZstd(data: Uint8Array): boolean {
 interface DecodedFigFile {
   schema: unknown;
   message: Record<string, unknown>;
+  images: Map<string, FigImageAsset>;
+  thumbnail?: Buffer;
 }
 
 async function decodeFigFile(zipBuf: Buffer): Promise<DecodedFigFile> {
@@ -256,6 +258,8 @@ async function decodeFigFile(zipBuf: Buffer): Promise<DecodedFigFile> {
     throw new Error('.fig ZIP does not contain canvas.fig');
   }
   const canvasBuf = extractZipEntry(zipBuf, canvasEntry);
+  const images = extractImages(zipBuf, entries);
+  const thumbnail = extractThumbnail(zipBuf, entries);
 
   // 2. Parse fig-kiwi archive (header + chunks)
   const archive = parseFigKiwiArchive(canvasBuf);
@@ -282,7 +286,7 @@ async function decodeFigFile(zipBuf: Buffer): Promise<DecodedFigFile> {
   const compiled = kiwiSchema.compileSchema(schemaObj);
   const message = compiled.decodeMessage(dataRaw) as Record<string, unknown>;
 
-  return { schema: schemaObj, message };
+  return { schema: schemaObj, message, images, thumbnail };
 }
 
 /* ── Decoded Node Types ──────────────────────────────────────────────── */
@@ -299,7 +303,19 @@ function guidKey(guid: unknown): string {
   return `${num(g.sessionID)}:${num(g.localID)}`;
 }
 
-interface FigNode {
+export interface FigColor {
+  r: number;
+  g: number;
+  b: number;
+  a?: number;
+}
+
+export interface FigGradientStop {
+  position: number; // 0-1
+  color: FigColor;
+}
+
+export interface FigNode {
   id: string;
   type: string;
   name: string;
@@ -308,19 +324,31 @@ interface FigNode {
   y: number;
   width: number;
   height: number;
+  /** Rotation in degrees, derived from transform matrix */
+  rotation?: number;
+  /** Full 2×3 affine transform (m00, m01, m02, m10, m11, m12) */
+  transform?: [number, number, number, number, number, number];
   fills?: FigPaint[];
   strokes?: FigPaint[];
   strokeWeight?: number;
+  strokeAlign?: 'INSIDE' | 'OUTSIDE' | 'CENTER';
+  strokeDashPattern?: number[];
   cornerRadius?: number;
   rectangleCornerRadii?: [number, number, number, number];
   opacity?: number;
+  blendMode?: string;
+  clipsContent?: boolean;
+  isMask?: boolean;
   characters?: string;
   fontFamily?: string;
   fontSize?: number;
   fontWeight?: number;
+  italic?: boolean;
+  textDecoration?: 'NONE' | 'UNDERLINE' | 'STRIKETHROUGH';
   lineHeightPx?: number;
   letterSpacing?: number;
   textAlignHorizontal?: string;
+  textAlignVertical?: string;
   layoutMode?: string;
   primaryAxisAlignItems?: string;
   counterAxisAlignItems?: string;
@@ -330,24 +358,33 @@ interface FigNode {
   paddingTop?: number;
   paddingBottom?: number;
   effects?: FigEffect[];
+  /** Decoded SVG path data (for VECTOR nodes, if available) */
+  vectorPaths?: string[];
   children?: FigNode[];
 }
 
-interface FigPaint {
+export interface FigPaint {
   type: string;
   visible?: boolean;
-  color?: { r: number; g: number; b: number; a?: number };
+  color?: FigColor;
   opacity?: number;
+  blendMode?: string;
   imageRef?: string;
+  imageScaleMode?: 'FILL' | 'FIT' | 'CROP' | 'TILE';
+  /** Gradient stops (for GRADIENT_* paints) */
+  gradientStops?: FigGradientStop[];
+  /** Gradient handle positions — Figma stores three (origin, end, width-anchor) in unit-box space */
+  gradientHandlePositions?: { x: number; y: number }[];
 }
 
-interface FigEffect {
+export interface FigEffect {
   type: string;
   visible?: boolean;
   radius?: number;
   offset?: { x: number; y: number };
-  color?: { r: number; g: number; b: number; a?: number };
+  color?: FigColor;
   spread?: number;
+  blendMode?: string;
 }
 
 export interface FigDocument {
@@ -355,6 +392,18 @@ export interface FigDocument {
   pages: FigPage[];
   width: number;
   height: number;
+  /** Raw image blobs keyed by Figma image hash (as found in node fills' imageRef) */
+  images: Map<string, FigImageAsset>;
+  /** Thumbnail PNG from the .fig archive, if present */
+  thumbnail?: Buffer;
+}
+
+export interface FigImageAsset {
+  hash: string;
+  /** Raw image bytes (usually PNG or JPEG) */
+  data: Buffer;
+  /** MIME type guessed from magic bytes */
+  mime: string;
 }
 
 export interface FigPage {
@@ -379,7 +428,7 @@ const NODE_TYPE_MAP: Record<string, string> = {
   CODE_BLOCK: 'FRAME', WIDGET: 'FRAME', MEDIA: 'IMAGE',
 };
 
-function extractColor(v: unknown): { r: number; g: number; b: number; a?: number } | undefined {
+function extractColor(v: unknown): FigColor | undefined {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
   const obj = v as KObj;
   if ('r' in obj) {
@@ -388,16 +437,64 @@ function extractColor(v: unknown): { r: number; g: number; b: number; a?: number
   return undefined;
 }
 
+function extractGradientStops(v: unknown): FigGradientStop[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const stops: FigGradientStop[] = [];
+  for (const item of v) {
+    if (!item || typeof item !== 'object') continue;
+    const obj = item as KObj;
+    const color = extractColor(obj.color);
+    if (!color) continue;
+    stops.push({
+      position: obj.position !== undefined ? num(obj.position) : 0,
+      color,
+    });
+  }
+  return stops.length ? stops : undefined;
+}
+
+function extractHandles(v: unknown): { x: number; y: number }[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const out: { x: number; y: number }[] = [];
+  for (const h of v) {
+    if (!h || typeof h !== 'object') continue;
+    const obj = h as KObj;
+    out.push({ x: num(obj.x), y: num(obj.y) });
+  }
+  return out.length ? out : undefined;
+}
+
+function mapImageScale(v: unknown): FigPaint['imageScaleMode'] {
+  const s = str(v).toUpperCase();
+  if (s === 'FILL' || s === 'FIT' || s === 'CROP' || s === 'TILE') return s;
+  return undefined;
+}
+
 function extractPaint(v: unknown): FigPaint | undefined {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
   const obj = v as KObj;
-  return {
-    type: str(obj.type) || 'SOLID',
+  const type = str(obj.type) || 'SOLID';
+  const paint: FigPaint = {
+    type,
     visible: obj.visible !== undefined ? obj.visible === true : true,
     color: extractColor(obj.color),
     opacity: obj.opacity !== undefined ? num(obj.opacity) : undefined,
-    imageRef: str(obj.imageRef),
+    blendMode: obj.blendMode !== undefined ? str(obj.blendMode) : undefined,
+    imageRef: obj.image !== undefined
+      ? str((obj.image as KObj)?.hash) || str(obj.imageRef)
+      : str(obj.imageRef) || undefined,
+    imageScaleMode: mapImageScale(obj.imageScaleMode ?? obj.scaleMode),
   };
+  // Gradients
+  const stops = extractGradientStops(obj.gradientStops ?? obj.stops);
+  if (stops) paint.gradientStops = stops;
+  const handles =
+    extractHandles(obj.gradientHandlePositions) ??
+    extractHandles(obj.gradientHandles) ??
+    extractHandles(obj.handles);
+  if (handles) paint.gradientHandlePositions = handles;
+  if (!paint.imageRef) delete paint.imageRef;
+  return paint;
 }
 
 function extractEffect(v: unknown): FigEffect | undefined {
@@ -413,6 +510,7 @@ function extractEffect(v: unknown): FigEffect | undefined {
     offset: off,
     color: extractColor(obj.color),
     spread: obj.spread !== undefined ? num(obj.spread) : undefined,
+    blendMode: obj.blendMode !== undefined ? str(obj.blendMode) : undefined,
   };
 }
 
@@ -440,10 +538,22 @@ function nodeChangeToFigNode(nc: KObj): FigNode {
   const width = size ? num(size.x) : 0;
   const height = size ? num(size.y) : 0;
 
-  // Position from transform.m02 / transform.m12
+  // Affine transform: [m00 m01 m02; m10 m11 m12]
   const transform = nc.transform as KObj | undefined;
+  const m00 = transform?.m00 !== undefined ? num(transform.m00) : 1;
+  const m01 = transform?.m01 !== undefined ? num(transform.m01) : 0;
+  const m10 = transform?.m10 !== undefined ? num(transform.m10) : 0;
+  const m11 = transform?.m11 !== undefined ? num(transform.m11) : 1;
   const x = transform ? num(transform.m02) : 0;
   const y = transform ? num(transform.m12) : 0;
+
+  // Derive rotation (degrees, clockwise in screen space) from the matrix.
+  // Figma stores rotation in m00/m10: cos(θ), sin(θ).
+  let rotation = 0;
+  if (transform && (Math.abs(m01) > 1e-6 || Math.abs(m10) > 1e-6 || Math.abs(m00 - 1) > 1e-6)) {
+    rotation = Math.atan2(m10, m00) * (180 / Math.PI);
+    if (Math.abs(rotation) < 1e-3) rotation = 0;
+  }
 
   const node: FigNode = {
     id: guidKey(nc.guid),
@@ -453,7 +563,14 @@ function nodeChangeToFigNode(nc: KObj): FigNode {
     x, y,
     width: width || 100,
     height: height || 100,
+    rotation: rotation || undefined,
+    transform: transform ? [m00, m01, x, m10, m11, y] : undefined,
     opacity: nc.opacity !== undefined ? num(nc.opacity) : undefined,
+    blendMode: nc.blendMode !== undefined ? str(nc.blendMode) : undefined,
+    clipsContent: nc.frameMaskDisabled !== undefined
+      ? nc.frameMaskDisabled !== true
+      : (nc.clipsContent !== undefined ? nc.clipsContent === true : undefined),
+    isMask: nc.mask !== undefined ? nc.mask === true : undefined,
   };
 
   // Fills
@@ -466,6 +583,13 @@ function nodeChangeToFigNode(nc: KObj): FigNode {
     node.strokes = (nc.strokePaints as unknown[]).map(extractPaint).filter((f): f is FigPaint => !!f);
   }
   if (nc.strokeWeight !== undefined) node.strokeWeight = num(nc.strokeWeight);
+  if (nc.strokeAlign !== undefined) {
+    const sa = str(nc.strokeAlign).toUpperCase();
+    if (sa === 'INSIDE' || sa === 'OUTSIDE' || sa === 'CENTER') node.strokeAlign = sa;
+  }
+  if (Array.isArray(nc.dashPattern) && nc.dashPattern.length > 0) {
+    node.strokeDashPattern = (nc.dashPattern as unknown[]).map((d) => num(d));
+  }
 
   // Corner radius
   if (nc.cornerRadius !== undefined) node.cornerRadius = num(nc.cornerRadius);
@@ -507,6 +631,18 @@ function nodeChangeToFigNode(nc: KObj): FigNode {
     if (nc.textAlignHorizontal !== undefined) {
       node.textAlignHorizontal = str(nc.textAlignHorizontal);
     }
+    if (nc.textAlignVertical !== undefined) {
+      node.textAlignVertical = str(nc.textAlignVertical);
+    }
+    if (fontName?.style !== undefined) {
+      node.italic = /italic|oblique/i.test(str(fontName.style));
+    }
+    if (nc.textDecoration !== undefined) {
+      const d = str(nc.textDecoration).toUpperCase();
+      if (d === 'UNDERLINE' || d === 'STRIKETHROUGH' || d === 'NONE') {
+        node.textDecoration = d;
+      }
+    }
   }
 
   // Auto-layout (stack properties)
@@ -539,7 +675,11 @@ function nodeChangeToFigNode(nc: KObj): FigNode {
 }
 
 // Build a tree from flat nodeChanges using parentIndex GUIDs
-function buildNodeTree(nodeChanges: KObj[]): FigDocument {
+function buildNodeTree(
+  nodeChanges: KObj[],
+  images: Map<string, FigImageAsset>,
+  thumbnail?: Buffer,
+): FigDocument {
   // Phase flag: skip REMOVED nodes
   const liveNodes = nodeChanges.filter((nc) => str(nc.phase) !== 'REMOVED');
 
@@ -617,7 +757,59 @@ function buildNodeTree(nodeChanges: KObj[]): FigDocument {
     if (first.height > 0) height = first.height;
   }
 
-  return { name: docName, pages, width, height };
+  return { name: docName, pages, width, height, images, thumbnail };
+}
+
+/* ── Image Asset Extraction ──────────────────────────────────────────── */
+
+function guessImageMime(data: Buffer): string {
+  if (data.length >= 8 &&
+      data[0] === 0x89 && data[1] === 0x50 && data[2] === 0x4E && data[3] === 0x47) {
+    return 'image/png';
+  }
+  if (data.length >= 3 && data[0] === 0xFF && data[1] === 0xD8 && data[2] === 0xFF) {
+    return 'image/jpeg';
+  }
+  if (data.length >= 6 &&
+      data[0] === 0x47 && data[1] === 0x49 && data[2] === 0x46 &&
+      data[3] === 0x38 && (data[4] === 0x37 || data[4] === 0x39) && data[5] === 0x61) {
+    return 'image/gif';
+  }
+  if (data.length >= 4 && data[0] === 0x52 && data[1] === 0x49 && data[2] === 0x46 && data[3] === 0x46) {
+    return 'image/webp';
+  }
+  if (data.length >= 5 && data.slice(0, 5).toString('ascii') === '<?xml') {
+    return 'image/svg+xml';
+  }
+  return 'application/octet-stream';
+}
+
+function extractImages(zipBuf: Buffer, entries: ZipEntry[]): Map<string, FigImageAsset> {
+  const map = new Map<string, FigImageAsset>();
+  for (const entry of entries) {
+    if (!entry.name.startsWith('images/')) continue;
+    if (entry.uncompressedSize === 0) continue;
+    try {
+      const data = extractZipEntry(zipBuf, entry);
+      // Hash is the basename without extension
+      const base = entry.name.slice('images/'.length);
+      const hash = base.replace(/\.[^.]+$/, '');
+      map.set(hash, { hash, data, mime: guessImageMime(data) });
+    } catch {
+      // skip unreadable entries
+    }
+  }
+  return map;
+}
+
+function extractThumbnail(zipBuf: Buffer, entries: ZipEntry[]): Buffer | undefined {
+  const entry = entries.find((e) => e.name === 'thumbnail.png');
+  if (!entry) return undefined;
+  try {
+    return extractZipEntry(zipBuf, entry);
+  } catch {
+    return undefined;
+  }
 }
 
 /* ── FigNode → IR Conversion ─────────────────────────────────────────── */
@@ -808,12 +1000,12 @@ function pageToIRDocument(page: FigPage, docName: string, defaultWidth: number, 
 /* ── Public API ──────────────────────────────────────────────────────── */
 
 export async function parseFigBinary(buf: Buffer): Promise<FigDocument> {
-  const { message } = await decodeFigFile(buf);
+  const { message, images, thumbnail } = await decodeFigFile(buf);
   const nodeChanges = message.nodeChanges;
   if (!Array.isArray(nodeChanges) || nodeChanges.length === 0) {
     throw new Error('No node changes found in the .fig file');
   }
-  return buildNodeTree(nodeChanges as KObj[]);
+  return buildNodeTree(nodeChanges as KObj[], images, thumbnail);
 }
 
 export async function parseFig(buf: Buffer): Promise<IRDocument> {
