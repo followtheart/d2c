@@ -238,14 +238,36 @@ function shapeElement(
 
 /* ── Fill Rendering ───────────────────────────────────────────────────── */
 
-function resolveFillValue(fill: RenderFill, ctx: SvgContext): string {
+function isResolvableImageRef(ref: string | undefined): ref is string {
+  if (!ref) return false;
+  return ref.startsWith('data:') || ref.startsWith('http://') || ref.startsWith('https://') ||
+         ref.startsWith('./') || ref.startsWith('/');
+}
+
+function resolveFillValue(fill: RenderFill, ctx: SvgContext, node?: RenderNode): string {
   if (fill.type === 'color' && fill.color) return esc(fill.color);
   if (fill.type === 'gradient' && fill.gradient) {
     const gradId = nextId(ctx, 'grad');
     ctx.defs.push(renderGradientDef(fill.gradient, gradId));
     return `url(#${gradId})`;
   }
-  // Pattern or unsupported: light gray placeholder
+  // Image / pattern fill: if we have a resolvable reference, emit a
+  // <pattern> containing an <image> that fills the node's bounding box.
+  if (fill.type === 'pattern' && isResolvableImageRef(fill.patternRef) && node) {
+    const s = ctx.scale;
+    const w = px(node.frame.width, s);
+    const h = px(node.frame.height, s);
+    const x = px(node.frame.x, s);
+    const y = px(node.frame.y, s);
+    const patId = nextId(ctx, 'imgfill');
+    ctx.defs.push(
+      `<pattern id="${patId}" patternUnits="userSpaceOnUse" x="${x}" y="${y}" width="${w}" height="${h}">` +
+      `<image href="${esc(fill.patternRef!)}" x="0" y="0" width="${w}" height="${h}" preserveAspectRatio="xMidYMid slice" />` +
+      `</pattern>`,
+    );
+    return `url(#${patId})`;
+  }
+  // Unresolvable pattern: light gray placeholder
   return '#e0e0e0';
 }
 
@@ -317,6 +339,13 @@ function renderImage(node: RenderNode, ctx: SvgContext): string {
   const w = px(node.frame.width, s);
   const h = px(node.frame.height, s);
 
+  // If we have a real image reference (data URI, URL), render it directly.
+  if (isResolvableImageRef(node.imageRef)) {
+    const radiusClip = resolveClipForImage(node, ctx);
+    const imgTag = `<image href="${esc(node.imageRef!)}" x="${x}" y="${y}" width="${w}" height="${h}" preserveAspectRatio="xMidYMid slice"${radiusClip} />`;
+    return imgTag;
+  }
+
   // Crosshatch placeholder for images (since we don't have the actual bitmap)
   const patId = nextId(ctx, 'imgpat');
   ctx.defs.push(
@@ -327,6 +356,24 @@ function renderImage(node: RenderNode, ctx: SvgContext): string {
   );
 
   return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="url(#${patId})" stroke="#ccc" stroke-width="0.5" />`;
+}
+
+function resolveClipForImage(node: RenderNode, ctx: SvgContext): string {
+  if (node.borderRadius === undefined) return '';
+  const s = ctx.scale;
+  const clipId = nextId(ctx, 'imgclip');
+  if (typeof node.borderRadius === 'number') {
+    ctx.defs.push(
+      `<clipPath id="${clipId}"><rect x="${px(node.frame.x, s)}" y="${px(node.frame.y, s)}" width="${px(node.frame.width, s)}" height="${px(node.frame.height, s)}" rx="${px(node.borderRadius, s)}" ry="${px(node.borderRadius, s)}" /></clipPath>`,
+    );
+  } else {
+    const d = roundedRectPath(
+      node.frame.x, node.frame.y, node.frame.width, node.frame.height,
+      node.borderRadius, s,
+    );
+    ctx.defs.push(`<clipPath id="${clipId}"><path d="${d}" /></clipPath>`);
+  }
+  return ` clip-path="url(#${clipId})"`;
 }
 
 /* ── Node Rendering (recursive) ───────────────────────────────────────── */
@@ -428,7 +475,7 @@ function renderNode(node: RenderNode, ctx: SvgContext, indent: number): string {
       parts.push(`${pad}  ${shapeElement(node, 'none', '', 0, ctx)}`);
     } else {
       for (const fill of node.fills) {
-        const fillVal = resolveFillValue(fill, ctx);
+        const fillVal = resolveFillValue(fill, ctx, node);
         const fillOpacity =
           fill.opacity !== undefined && fill.opacity < 1
             ? ` opacity="${fill.opacity}"`
