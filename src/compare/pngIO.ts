@@ -6,9 +6,9 @@
 import * as fs from 'fs';
 import type { RGBAImage } from './types';
 
-let pngjsCache: typeof import('pngjs') | null | undefined;
+let pngjsCache: any | null | undefined;
 
-function loadPngjs(): typeof import('pngjs') {
+function loadPngjs(): any {
   if (pngjsCache === undefined) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports

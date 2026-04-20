@@ -166,7 +166,7 @@ export async function runFigmaFidelity(
       'color',
       color,
       `ΔE mean ${de.mean.toFixed(1)}, p95 ${de.p95.toFixed(1)}`,
-      de,
+      { ...de },
     );
   }
 
