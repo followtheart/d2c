@@ -67,6 +67,22 @@ interface Args {
   visionProvider?: 'openrouter' | 'anthropic' | 'zhipuai' | 'dashscope';
   /** Vision model id override. */
   visionModel?: string;
+  /** Run the ground-truth-anchored fidelity comparison (Figma ↔ codegen). */
+  compareFidelity?: boolean;
+  /** Path to the reference rendering PNG (Figma export / Sketch preview). */
+  referenceImage?: string;
+  /** Path to the candidate rendering PNG (codegen HTML screenshot). */
+  candidateImage?: string;
+  /** Path to an IR JSON snapshot (enables region + text layers). */
+  fidelityIR?: string;
+  /** Path to a codegen JSON snapshot (enables text layer). */
+  fidelityCodegen?: string;
+  /** Output path for the fidelity report (md / html / json). */
+  fidelityReport?: string;
+  /** Directory for diagnostic images (heatmap, aligned PNGs). */
+  fidelityDiagnosticsDir?: string;
+  /** Also invoke the vision LLM for the perceptual-LLM dimension. */
+  fidelityUseLlm?: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -178,6 +194,30 @@ function parseArgs(argv: string[]): Args {
       case '--vision-model':
         args.visionModel = next();
         break;
+      case '--compare-fidelity':
+        args.compareFidelity = true;
+        break;
+      case '--reference-image':
+        args.referenceImage = next();
+        break;
+      case '--candidate-image':
+        args.candidateImage = next();
+        break;
+      case '--fidelity-ir':
+        args.fidelityIR = next();
+        break;
+      case '--fidelity-codegen':
+        args.fidelityCodegen = next();
+        break;
+      case '--fidelity-report':
+        args.fidelityReport = next();
+        break;
+      case '--fidelity-diagnostics-dir':
+        args.fidelityDiagnosticsDir = next();
+        break;
+      case '--fidelity-use-llm':
+        args.fidelityUseLlm = true;
+        break;
       case '--verbose':
       case '-v':
         args.verbose = true;
@@ -263,6 +303,25 @@ Options:
       --vision-provider <name>     Vision backend: openrouter | anthropic
                                  | zhipuai | dashscope (default: openrouter).
       --vision-model <id>          Override the vision model id.
+      --compare-fidelity           Run ground-truth-anchored fidelity
+                                 comparison between a reference PNG
+                                 (Figma export) and the codegen PNG
+                                 — replaces the old "overall" score.
+                                 Outputs 6-dim breakdown + heatmap.
+                                 Requires pngjs: npm install pngjs.
+      --reference-image <file>     Reference rendering (Figma PNG export).
+      --candidate-image <file>     Candidate rendering (codegen.png).
+                                 If omitted, falls back to
+                                 <render-output>/codegen.png.
+      --fidelity-ir <file>         IR JSON snapshot (enables region +
+                                 text layers).
+      --fidelity-codegen <file>    Codegen JSON snapshot (enables text
+                                 layer).
+      --fidelity-report <file>     Report output (.md / .html / .json).
+      --fidelity-diagnostics-dir <dir>  Directory for diagnostic images
+                                 (heatmap, aligned PNGs).
+      --fidelity-use-llm           Also run the 6-dim LLM perceptual
+                                 judgment (needs --vision-provider).
       --render                     Render the design visually (SVG / HTML)
                                  instead of generating code. Implies
                                  --format sketch (or auto-detected).
@@ -302,6 +361,9 @@ Examples:
   d2c --render-snapshots snapshots/ --snapshot-format html --render-output out/html
   d2c --compare-stages --render-output images/ --compare-report report.md
   OPENROUTER_API_KEY=... d2c --compare-stages --render-output images/ --vision-model openai/gpt-4o
+  d2c --compare-fidelity --reference-image figma.png --candidate-image codegen.png \\
+      --fidelity-ir ir.json --fidelity-report report.md \\
+      --fidelity-diagnostics-dir out/fidelity
 `;
 
 /**
@@ -431,6 +493,111 @@ async function compareStagesCommand(args: Args): Promise<void> {
 }
 
 /**
+ * Run ground-truth-anchored fidelity comparison (Figma rendering ↔
+ * codegen rendering).  Replaces the deprecated overall-score path.
+ */
+async function compareFidelityCommand(args: Args): Promise<void> {
+  const referencePath = args.referenceImage;
+  const candidatePath =
+    args.candidateImage ??
+    (args.renderOutput ? path.join(args.renderOutput, 'codegen.png') : undefined);
+
+  if (!referencePath) {
+    console.error('ERROR: --compare-fidelity requires --reference-image <file>.');
+    process.exit(2);
+  }
+  if (!candidatePath) {
+    console.error(
+      'ERROR: --compare-fidelity requires --candidate-image <file> or --render-output <dir>.',
+    );
+    process.exit(2);
+  }
+
+  // Optional IR + codegen snapshots
+  let ir: import('./ir/types').IRDocument | undefined;
+  let generated: import('./codegen/base').GenerateResult | undefined;
+  if (args.fidelityIR) {
+    const obj = JSON.parse(fs.readFileSync(args.fidelityIR, 'utf8'));
+    // Accept either a raw IR or a stage snapshot with `ir` field
+    ir = obj.ir ?? obj;
+  }
+  if (args.fidelityCodegen) {
+    const obj = JSON.parse(fs.readFileSync(args.fidelityCodegen, 'utf8'));
+    // Accept either a raw GenerateResult or a snapshot with `generated` field
+    const gen = obj.generated ?? obj;
+    if (gen && Array.isArray(gen.files)) {
+      generated = {
+        entryFile: gen.entryFile ?? gen.files[0]?.path ?? '',
+        files: gen.files.map((f: { path: string; content?: string }) => ({
+          path: f.path,
+          content: f.content ?? '',
+        })),
+      };
+    }
+  }
+
+  let vision;
+  if (args.fidelityUseLlm) {
+    const config = loadConfig();
+    const backend = args.visionProvider ?? 'openrouter';
+    const envVar = apiKeyEnvVarFor(backend);
+    const apiKey = resolveApiKey(backend, envVar, config);
+    if (!apiKey) {
+      console.error(
+        `ERROR: --fidelity-use-llm with --vision-provider ${backend} requires ${envVar} or apiKeys.${backend}.`,
+      );
+      process.exit(2);
+    }
+    const { VisionProvider } = await import('./ai/visionProvider');
+    vision = new VisionProvider({
+      provider: backend,
+      apiKey,
+      model: args.visionModel,
+    });
+  }
+
+  const { runFigmaFidelity } = await import('./compare');
+  const { writeReport } = await import('./compare');
+
+  console.error(`d2c compare-fidelity: ${referencePath} ↔ ${candidatePath}`);
+  const report = await runFigmaFidelity({
+    referencePath,
+    candidatePath,
+    ir,
+    generated,
+    vision,
+    outputDir: args.fidelityDiagnosticsDir,
+    writeDiagnostics: !!args.fidelityDiagnosticsDir,
+    onProgress: (msg) => console.error(msg),
+  });
+
+  const reportPath =
+    args.fidelityReport ??
+    (args.fidelityDiagnosticsDir
+      ? path.join(args.fidelityDiagnosticsDir, 'fidelity_report.md')
+      : 'fidelity_report.md');
+  writeReport(report, reportPath, args.fidelityDiagnosticsDir);
+  console.error(`d2c compare-fidelity: wrote report → ${reportPath}`);
+
+  // Human-readable summary
+  console.error('\n  Fidelity Summary:');
+  for (const [name, dim] of Object.entries(report.dimensions)) {
+    const val =
+      dim.value === undefined ? '  N/A ' : `${(dim.value * 10).toFixed(1)}/10`;
+    console.error(`    ${name.padEnd(12)} ${val}   ${dim.summary}`);
+  }
+  console.error(`    Overall      ${report.overall.toFixed(1)}/10`);
+  if (report.weakestDimension) {
+    console.error(`    weakest      ${report.weakestDimension}`);
+  }
+  if (report.warnings.length) {
+    console.error('\n  Warnings:');
+    for (const w of report.warnings) console.error(`    [${w.code}] ${w.message}`);
+  }
+  console.error('');
+}
+
+/**
  * Render per-stage snapshot JSON files to HTML or PNG.
  *
  * Reads every `<stage>.json` in `--render-snapshots <dir>`, passes
@@ -507,7 +674,13 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  if (args.help || (!args.input && !args.renderSnapshots && !args.compareStages)) {
+  if (
+    args.help ||
+    (!args.input &&
+      !args.renderSnapshots &&
+      !args.compareStages &&
+      !args.compareFidelity)
+  ) {
     console.log(USAGE);
     process.exit(args.help ? 0 : 1);
   }
@@ -519,6 +692,9 @@ async function main(): Promise<void> {
     }
     if (args.compareStages) {
       await compareStagesCommand(args);
+    }
+    if (args.compareFidelity) {
+      await compareFidelityCommand(args);
     }
     return;
   }
@@ -904,6 +1080,9 @@ async function main(): Promise<void> {
         }
         if (args.compareStages) {
           await compareStagesCommand(args);
+        }
+        if (args.compareFidelity) {
+          await compareFidelityCommand(args);
         }
       }
     }
