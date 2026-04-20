@@ -1,12 +1,13 @@
 # d2c — Design-to-Code Converter
 
 An end-to-end **Design-to-Code (D2C)** pipeline that converts design files
-(Figma REST API, Sketch JSON, or a simpler "native" design JSON) into working
-**React + Tailwind**, **Vue 3 SFC**, **HTML + CSS**, **React Native**, or
-**Flutter** source code — with design-token extraction, Tailwind preset
-generation, antd / MUI component matching, responsive breakpoint inference,
-protected `// ai:ignore` regions for safe regeneration,**阶段快照可视化**,
-以及**多模态 LLM 阶段比对分析**。
+(Figma REST API, **Figma `.fig` binary**, Figma Make, Sketch JSON, or a
+simpler "native" design JSON) into working **React + Tailwind**,
+**Vue 3 SFC**, **HTML + CSS**, **React Native**, or **Flutter** source code
+— with design-token extraction, Tailwind preset generation, antd / MUI
+component matching, responsive breakpoint inference, protected
+`// ai:ignore` regions for safe regeneration, **高保真 `.fig` 渲染引擎**,
+**阶段快照可视化**, 以及 **多模态 LLM 阶段比对分析**。
 
 Based on the architecture described in [`doc/opus4.6.md`](doc/opus4.6.md) and
 [`doc/qwen3.6.md`](doc/qwen3.6.md):
@@ -28,8 +29,10 @@ Based on the architecture described in [`doc/opus4.6.md`](doc/opus4.6.md) and
 
 ### Pipeline stages
 
-1. **Parser** (`src/parser`) — accepts Figma REST API shape or a native
-   hand-authorable JSON; produces the IR tree.
+1. **Parser** (`src/parser`) — accepts Figma REST API shape, **Figma `.fig`
+   binary files (ZIP + fig-kiwi archive, with embedded image assets)**,
+   Figma Make (`.make`), Sketch JSON, or native hand-authorable JSON;
+   produces the IR tree.
 2. **IR** (`src/ir`) — the tool/target-agnostic intermediate representation
    (node types, box, layout, style, text, semantics).
 3. **Layout inference** (`src/layout`) — deterministic rule engine that
@@ -69,7 +72,7 @@ Based on the architecture described in [`doc/opus4.6.md`](doc/opus4.6.md) and
 ```bash
 npm install        # installs only typescript + @types/node (zero runtime deps)
 npm run build
-npm test           # runs the node:test suite (161 tests, end-to-end)
+npm test           # runs the node:test suite (217 tests, end-to-end)
 
 # Generate React code from the sample design
 node dist/cli.js --input examples/sample-design.json --platform react --out out/react
@@ -109,7 +112,8 @@ DEEPSEEK_API_KEY=sk-... node dist/cli.js \
   -o, --out <dir|->              Output directory, or '-' for stdout
   -p, --platform <name>          Target platform: react | vue | html |
                                  react-native | flutter (default: react)
-  -f, --format <name>            Input format: figma | sketch | native | make | auto
+  -f, --format <name>            Input format: figma | sketch | native | make |
+                                 fig | auto
       --emit-ir <file>           Also write the intermediate IR JSON
       --emit-tokens <file>       Write design tokens (style-dictionary JSON)
       --emit-tailwind <file>     Write a Tailwind preset (theme.extend) module
@@ -171,6 +175,13 @@ node dist/cli.js -i examples/sample-design.json \
 
 # Sketch (pre-extracted page JSON from a .sketch ZIP)
 node dist/cli.js -i examples/sketch-sample.json -f sketch -p react -o out/sketch
+
+# .fig (Figma native binary) — high-fidelity visual preview
+node dist/cli.js -i examples/CRM.fig --render --render-format html \
+    -o out/crm-preview
+
+# .fig → React code (one component per top-level FRAME)
+node dist/cli.js -i examples/website.fig -p react -o out/website
 
 # Pipeline verification with stage snapshots
 node dist/cli.js -i examples/sample-design.json -p react -o out/react \
@@ -435,6 +446,101 @@ Given absolute coordinates and sizes, the inference engine (`src/layout/inferenc
    - Users can also plug in any custom backend (Qwen-VL, local vLLM, etc.) by
      implementing the one-method `LLMProvider` interface.
 
+## `.fig` 高保真渲染引擎
+
+d2c 支持**直接渲染 Figma 原生 `.fig` 二进制文件**为可视化的 SVG / HTML 预览。
+区别于许多 `.fig → HTML` 转换器（会先降级到中间格式从而丢失视觉细节），d2c
+的 `.fig` 渲染管线保留了 Figma 特有的视觉特性：
+
+- **线性 / 径向 / 角度渐变** — 保留 `gradientStops` 与 `gradientHandlePositions`
+- **旋转** — 从节点的 2×3 仿射矩阵（`m00/m01/m10/m11`）反推角度
+- **四角独立圆角** — `rectangleCornerRadii: [tl, tr, br, bl]`
+- **内阴影 / 投影 / 图层模糊 / 背景模糊** — `INNER_SHADOW`、`DROP_SHADOW`、
+  `LAYER_BLUR`、`BACKGROUND_BLUR`
+- **真实图片填充** — 从 `.fig` ZIP 内的 `images/` 目录抽取栅格资源并内联为
+  data URI，而不是占位图
+- **多页面 / 多画板** — 每个顶层 `FRAME` 渲染为独立 artboard（CRM 风格的多屏
+  设计一键导出）
+- **多填充 / 多描边 / 混合模式 / 每像素 opacity** — 逐项按栈序叠加
+
+### 数据流
+
+```
+┌───────────────┐   ┌─────────────────────┐   ┌──────────────────┐   ┌──────────┐
+│ design.fig    │──▶│ parseFigBinary()    │──▶│ buildFigRenderTree│──▶│ SVG +    │
+│ (ZIP+fig-kiwi │   │ → FigDocument       │   │ → RenderDocument │   │ HTML     │
+│  + images/)   │   │   (nodes + assets)  │   │                  │   │ preview  │
+└───────────────┘   └─────────────────────┘   └──────────────────┘   └──────────┘
+```
+
+`.fig` 的解码链（ZIP → `canvas.fig` → fig-kiwi schema + message → 节点树）由
+`src/parser/figBinaryParser.ts` 完成，依赖运行时可选装的 `fzstd`（用于 zstd
+解压）和 `kiwi-schema`（用于 Kiwi 消息解码）。
+
+### CLI 使用
+
+```bash
+# 交互式 HTML 预览（支持 pan / zoom，每个顶层 FRAME 一张画板）
+node dist/cli.js --input examples/CRM.fig --render --render-format html \
+    --out out/crm-preview
+
+# 按画板导出独立 SVG 文件
+node dist/cli.js --input examples/website.fig --render --render-format svg \
+    --out out/website-svg
+
+# 高清 2× 预览
+node dist/cli.js --input examples/CRM.fig --render --render-scale 2 \
+    --out out/crm-2x
+```
+
+`examples/CRM.fig`（多屏 CRM 设计）与 `examples/website.fig`（营销站）是内置
+的两个真实 `.fig` 样例。
+
+### 作为库使用
+
+```ts
+import * as fs from 'node:fs';
+import { parseFigBinary } from 'd2c/parser/figBinaryParser';
+import { renderFig } from 'd2c/renderer';
+
+const figDoc = await parseFigBinary(fs.readFileSync('design.fig'));
+
+// 一次性拿到 SVG Map + 独立 HTML 预览
+const { svgs, html, renderDoc } = renderFig(figDoc, {
+  scale: 1,
+  perFrameArtboards: true, // 每个顶层 FRAME 渲染为独立 artboard（默认 true）
+  includeHidden: false,
+});
+
+fs.writeFileSync('preview.html', html);
+for (const [name, svg] of svgs) {
+  fs.writeFileSync(`${name}.svg`, svg);
+}
+```
+
+### `FigRenderOptions`
+
+| 字段 | 默认 | 说明 |
+|------|------|------|
+| `scale` | `1` | 渲染缩放（影响 SVG viewBox 与像素尺寸） |
+| `includeHidden` | `false` | 是否渲染 `visible: false` 的节点 |
+| `perFrameArtboards` | `true` | 每个顶层 FRAME 一张 artboard；`false` 则每页合成一张 |
+| `pageBackground` | `'#f5f5f5'` | HTML 预览页底色 |
+| `showArtboardTitles` | `true` | HTML 预览中是否显示画板标题 |
+| `maxPreviewWidth` | — | HTML 视口最大宽度 |
+
+### 端到端：`.fig` → React 代码
+
+直接复用通用流水线，`.fig` 也能生成代码（经 `FigDocument → IRDocument`）：
+
+```bash
+# 单帧 → React 组件
+node dist/cli.js -i examples/website.fig -p react -o out/website
+
+# 每个顶层 FRAME 分别导出为独立 React 组件（CRM 多屏场景）
+node dist/cli.js -i examples/CRM.fig -p react -o out/crm --all-pages
+```
+
 ## 阶段快照渲染与多模态比对
 
 d2c 支持将流水线各阶段的中间结果**可视化**，并通过**多模态 LLM**自动比对
@@ -532,24 +638,26 @@ Mapped to the phases described in the design docs:
       五个阶段各有专属可视化渲染器），Playwright 截图服务，批量渲染 CLI。
 - [x] **P5**: 多模态阶段比对分析 — VisionProvider 支持 OpenRouter / Anthropic
       视觉后端，自动两两比较相邻阶段渲染结果并生成 Markdown / HTML / JSON 报告。
+- [x] **P6**: `.fig` 高保真渲染引擎 — Figma 原生二进制文件直接渲染为 SVG / HTML
+      预览，保留渐变、旋转、四角圆角、内阴影 / 模糊、真实图片填充、多画板。
 
 ## Directory layout
 
 ```
 src/
 ├── ir/            # Intermediate representation types & runtime validation
-├── parser/        # Figma + Sketch + native + Make design JSON parsers
+├── parser/        # Figma REST + .fig binary + Figma Make + Sketch + native parsers
 ├── layout/        # Deterministic layout inference + responsive merge
 ├── ai/            # Rule-based + optional LLM semantic enhancer +
 │                  # antd/MUI component matching + VisionProvider
 ├── tokens/        # Design token extraction + Tailwind preset generator
 ├── diff/          # IR diff + ai:ignore protected region merge
 ├── codegen/       # React, Vue, HTML, React Native, Flutter generators
-├── renderer/      # SVG/HTML design preview + stage snapshot renderers +
-│                  # Playwright screenshot service
+├── renderer/      # High-fidelity .fig/Sketch/Make → SVG/HTML preview +
+│                  # stage snapshot renderers + Playwright screenshot service
 ├── pipeline/      # End-to-end orchestration + verification +
 │                  # multimodal stage comparison + report generation
-├── tests/         # node:test suite (161 tests, no extra deps)
+├── tests/         # node:test suite (217 tests, no extra deps)
 ├── utils/         # Shared helpers (color, tree walking, case)
 ├── index.ts       # Library entry
 └── cli.ts         # CLI entry
@@ -558,7 +666,9 @@ examples/
 ├── sample-design-mobile.json  # Same UserCard at the sm breakpoint
 ├── figma-sample.json          # Figma REST API shape example
 ├── figma-make-sample.json     # Figma Make format example
-└── sketch-sample.json         # Pre-extracted Sketch page JSON
+├── sketch-sample.json         # Pre-extracted Sketch page JSON
+├── CRM.fig                    # Real Figma binary — multi-screen CRM design
+└── website.fig                # Real Figma binary — marketing site
 snapshots/
 ├── parse.json                 # Stage snapshot examples
 ├── layout.json
