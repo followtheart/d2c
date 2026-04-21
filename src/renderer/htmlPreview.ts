@@ -257,6 +257,9 @@ export function renderToHtmlPreview(
   const canvas = document.getElementById('canvas');
   const zoomDisplay = document.getElementById('zoomDisplay');
   const infoPanel = document.getElementById('infoPanel');
+  const artboardCards = Array.from(document.querySelectorAll('.artboard-card'));
+  const navButtons = Array.from(document.querySelectorAll('.nav-btn'));
+  const largeDocumentThreshold = 6;
 
   let zoom = 1;
   let panX = 0;
@@ -271,17 +274,44 @@ export function renderToHtmlPreview(
   }
 
   function fitAll() {
-    const rect = canvas.getBoundingClientRect();
     const vw = viewport.clientWidth;
     const vh = viewport.clientHeight;
     // Measure unscaled canvas size
-    canvas.style.transform = 'scale(1)';
+    canvas.style.transform = 'translate(0px, 0px) scale(1)';
     const cw = canvas.scrollWidth;
     const ch = canvas.scrollHeight;
     zoom = Math.min(vw / cw, vh / ch, 1) * 0.9;
     panX = (vw - cw * zoom) / 2;
     panY = (vh - ch * zoom) / 2;
     applyTransform();
+  }
+
+  function setActiveArtboard(index) {
+    navButtons.forEach(function(btn, btnIndex) {
+      btn.classList.toggle('active', btnIndex === index);
+    });
+  }
+
+  function fitArtboard(index) {
+    const card = artboardCards[index];
+    if (!card) {
+      fitAll();
+      return;
+    }
+    const vw = viewport.clientWidth;
+    const vh = viewport.clientHeight;
+    canvas.style.transform = 'translate(0px, 0px) scale(1)';
+    const canvasRect = canvas.getBoundingClientRect();
+    const cardRect = card.getBoundingClientRect();
+    const cardX = cardRect.left - canvasRect.left;
+    const cardY = cardRect.top - canvasRect.top;
+    const cardW = Math.max(cardRect.width, 1);
+    const cardH = Math.max(cardRect.height, 1);
+    zoom = Math.min(vw / cardW, vh / cardH, 1) * 0.9;
+    panX = (vw - cardW * zoom) / 2 - cardX * zoom;
+    panY = (vh - cardH * zoom) / 2 - cardY * zoom;
+    applyTransform();
+    setActiveArtboard(index);
   }
 
   function setZoom(newZoom, cx, cy) {
@@ -333,23 +363,10 @@ export function renderToHtmlPreview(
   };
 
   // Artboard navigation
-  document.querySelectorAll('.nav-btn').forEach(function(btn) {
+  navButtons.forEach(function(btn) {
     btn.addEventListener('click', function() {
       var idx = parseInt(btn.dataset.target);
-      var card = document.querySelectorAll('.artboard-card')[idx];
-      if (!card) return;
-      // Center this artboard
-      var cardRect = card.getBoundingClientRect();
-      var vw = viewport.clientWidth;
-      var vh = viewport.clientHeight;
-      var cardCX = (cardRect.left + cardRect.right) / 2;
-      var cardCY = (cardRect.top + cardRect.bottom) / 2;
-      panX += vw / 2 - cardCX;
-      panY += vh / 2 - cardCY;
-      applyTransform();
-      // Active state
-      document.querySelectorAll('.nav-btn').forEach(function(b) { b.classList.remove('active'); });
-      btn.classList.add('active');
+      fitArtboard(idx);
     });
   });
 
@@ -380,7 +397,14 @@ export function renderToHtmlPreview(
   });
 
   // Initial fit
-  requestAnimationFrame(function() { fitAll(); });
+  requestAnimationFrame(function() {
+    if (artboardCards.length > largeDocumentThreshold) {
+      fitArtboard(0);
+      return;
+    }
+    fitAll();
+    if (artboardCards.length > 0) setActiveArtboard(0);
+  });
 })();
 </script>
 </body>

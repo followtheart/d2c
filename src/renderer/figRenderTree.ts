@@ -57,6 +57,10 @@ export interface FigRenderOptions extends SketchRenderOptions {
   perFrameArtboards?: boolean;
 }
 
+function isPreviewArtboardNode(node: FigNode): boolean {
+  return node.type === 'FRAME' || node.type === 'SECTION';
+}
+
 export interface FigRenderResult {
   renderDoc: RenderDocument;
 }
@@ -285,9 +289,20 @@ function resolveBorderRadius(
 interface ConvertCtx {
   options: FigRenderOptions;
   resolver: ImageResolver;
-  /** Origin of the current artboard in page-space, used to convert absolute
-   *  FigNode coordinates into frame-local coordinates for the root node. */
-  artboardOrigin: { x: number; y: number };
+}
+
+function absolutizeNode(node: RenderNode, parentX = 0, parentY = 0): RenderNode {
+  const absoluteX = parentX + node.frame.x;
+  const absoluteY = parentY + node.frame.y;
+  return {
+    ...node,
+    frame: {
+      ...node.frame,
+      x: absoluteX,
+      y: absoluteY,
+    },
+    children: node.children.map((child) => absolutizeNode(child, absoluteX, absoluteY)),
+  };
 }
 
 function convertNode(node: FigNode, ctx: ConvertCtx, isRoot: boolean): RenderNode {
@@ -318,8 +333,9 @@ function convertNode(node: FigNode, ctx: ConvertCtx, isRoot: boolean): RenderNod
     children.push(convertNode(c, ctx, false));
   }
 
-  // Frame — root of an artboard is normalised to (0, 0); children keep their
-  // parent-relative coordinates as stored in the .fig transform.
+  // Root frames are normalized to the artboard origin. Descendants keep the
+  // parent-relative coordinates from the .fig transform and are converted to
+  // artboard-local absolute coordinates after the tree is built.
   const frame = isRoot
     ? { x: 0, y: 0, width: node.width, height: node.height }
     : { x: node.x, y: node.y, width: node.width, height: node.height };
@@ -379,22 +395,14 @@ function pageToArtboards(
   if (topLevel.length === 0) return [];
 
   if (perFrame) {
-    // Each frame-like child becomes its own artboard.  Loose shapes fall
-    // through into a synthetic artboard at the end.
+    // Each page-level FRAME / SECTION becomes its own artboard. Components
+    // and loose asset fragments are ignored by default so preview.html shows
+    // real screens rather than the entire asset library.
     const artboards: RenderArtboard[] = [];
     const loose: FigNode[] = [];
     for (const child of topLevel) {
-      const isFrame =
-        child.type === 'FRAME' ||
-        child.type === 'COMPONENT' ||
-        child.type === 'COMPONENT_SET' ||
-        child.type === 'SECTION';
-      if (isFrame) {
-        const localCtx: ConvertCtx = {
-          ...ctx,
-          artboardOrigin: { x: child.x, y: child.y },
-        };
-        const root = convertNode(child, localCtx, true);
+      if (isPreviewArtboardNode(child)) {
+        const root = absolutizeNode(convertNode(child, ctx, true));
         artboards.push({
           name: child.name || page.name,
           frame: { x: child.x, y: child.y, width: child.width || 1, height: child.height || 1 },
@@ -406,18 +414,16 @@ function pageToArtboards(
       }
     }
 
-    if (loose.length > 0) {
+    if (artboards.length === 0 && loose.length > 0) {
       const minX = Math.min(...loose.map((n) => n.x));
       const minY = Math.min(...loose.map((n) => n.y));
       const maxX = Math.max(...loose.map((n) => n.x + n.width));
       const maxY = Math.max(...loose.map((n) => n.y + n.height));
       const w = Math.max(1, maxX - minX);
       const h = Math.max(1, maxY - minY);
-      const rootChildren = loose.map((n) => {
-        const rn = convertNode(n, ctx, false);
-        rn.frame = { x: n.x - minX, y: n.y - minY, width: n.width, height: n.height };
-        return rn;
-      });
+      const rootChildren = loose.map((n) =>
+        absolutizeNode(convertNode(n, ctx, false), -minX, -minY),
+      );
       artboards.push({
         name: page.name,
         frame: { x: minX, y: minY, width: w, height: h },
@@ -451,11 +457,9 @@ function pageToArtboards(
   const maxY = Math.max(...topLevel.map((n) => n.y + n.height));
   const w = Math.max(1, maxX - minX);
   const h = Math.max(1, maxY - minY);
-  const rootChildren = topLevel.map((n) => {
-    const rn = convertNode(n, ctx, false);
-    rn.frame = { x: n.x - minX, y: n.y - minY, width: n.width, height: n.height };
-    return rn;
-  });
+  const rootChildren = topLevel.map((n) =>
+    absolutizeNode(convertNode(n, ctx, false), -minX, -minY),
+  );
   return [{
     name: page.name,
     frame: { x: minX, y: minY, width: w, height: h },
@@ -503,7 +507,6 @@ export function buildFigRenderTree(
     const ctx: ConvertCtx = {
       options: opts,
       resolver,
-      artboardOrigin: { x: 0, y: 0 },
     };
     artboards.push(...pageToArtboards(page, ctx, perFrame));
   }

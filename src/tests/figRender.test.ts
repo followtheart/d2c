@@ -66,6 +66,31 @@ test('figRenderTree: one artboard per top-level frame', () => {
   assert.equal(renderDoc.artboards[1].name, 'Settings');
 });
 
+test('figRenderTree: top-level components are skipped in per-frame preview mode', () => {
+  const component: FigNode = {
+    id: 'c1',
+    type: 'COMPONENT',
+    name: 'Icon/Button',
+    x: 0,
+    y: 0,
+    width: 24,
+    height: 24,
+    visible: true,
+    children: [],
+  };
+  const doc = makeDoc({
+    pages: [{
+      id: 'p1',
+      name: 'Page 1',
+      children: [makeFrame('f1', 'Home'), component],
+    }],
+  });
+
+  const { renderDoc } = buildFigRenderTree(doc);
+  assert.equal(renderDoc.artboards.length, 1);
+  assert.equal(renderDoc.artboards[0].name, 'Home');
+});
+
 test('figRenderTree: loose top-level shapes packed into one artboard', () => {
   const loose: FigNode = {
     id: 'l1',
@@ -85,6 +110,27 @@ test('figRenderTree: loose top-level shapes packed into one artboard', () => {
   const { renderDoc } = buildFigRenderTree(doc);
   assert.equal(renderDoc.artboards.length, 1);
   assert.equal(renderDoc.artboards[0].root.children.length, 1);
+});
+
+test('figRenderTree: loose top-level shapes are ignored when screen frames exist', () => {
+  const loose: FigNode = {
+    id: 'l1',
+    type: 'RECTANGLE',
+    name: 'Loose',
+    x: 20,
+    y: 30,
+    width: 100,
+    height: 60,
+    visible: true,
+    fills: [{ type: 'SOLID', color: { r: 0.2, g: 0.4, b: 0.8 } }],
+  };
+  const doc = makeDoc({
+    pages: [{ id: 'p1', name: 'Loose Page', children: [makeFrame('f1', 'Home'), loose] }],
+  });
+
+  const { renderDoc } = buildFigRenderTree(doc);
+  assert.equal(renderDoc.artboards.length, 1);
+  assert.equal(renderDoc.artboards[0].name, 'Home');
 });
 
 test('figRenderTree: perFrameArtboards=false collapses a page into one artboard', () => {
@@ -121,6 +167,43 @@ test('figRenderTree: preserves rotation from transform', () => {
   const { renderDoc } = buildFigRenderTree(doc);
   const child = renderDoc.artboards[0].root.children[0];
   assert.equal(child.rotation, 45);
+});
+
+test('figRenderTree: nested children are normalized to artboard-local absolute coordinates', () => {
+  const nested: FigNode = {
+    id: 'n1',
+    type: 'RECTANGLE',
+    name: 'Nested',
+    x: 12,
+    y: 18,
+    width: 40,
+    height: 24,
+    visible: true,
+    fills: [{ type: 'SOLID', color: { r: 1, g: 0, b: 0 } }],
+  };
+  const group: FigNode = {
+    id: 'g1',
+    type: 'GROUP',
+    name: 'Group',
+    x: 30,
+    y: 40,
+    width: 100,
+    height: 80,
+    visible: true,
+    children: [nested],
+  };
+  const frame = makeFrame('f1', 'Frame', [group]);
+  const doc = makeDoc({
+    pages: [{ id: 'p1', name: 'Page', children: [frame] }],
+  });
+
+  const { renderDoc } = buildFigRenderTree(doc);
+  const renderedGroup = renderDoc.artboards[0].root.children[0];
+  const renderedNested = renderedGroup.children[0];
+  assert.equal(renderedGroup.frame.x, 30);
+  assert.equal(renderedGroup.frame.y, 40);
+  assert.equal(renderedNested.frame.x, 42);
+  assert.equal(renderedNested.frame.y, 58);
 });
 
 test('figRenderTree: converts GRADIENT_LINEAR into a RenderGradient fill', () => {
@@ -304,6 +387,40 @@ test('renderFig: gradient fill emits a linearGradient def in SVG', () => {
   const svg = renderArtboardToSvg(renderDoc.artboards[0]);
   assert.ok(svg.includes('<linearGradient'), 'SVG should contain a <linearGradient>');
   assert.ok(svg.includes('stop-color="#ff0000"'), 'first gradient stop should be red');
+});
+
+test('renderFig: nested fig nodes render at absolute artboard coordinates in SVG', () => {
+  const nested: FigNode = {
+    id: 'n1',
+    type: 'RECTANGLE',
+    name: 'Nested',
+    x: 12,
+    y: 18,
+    width: 40,
+    height: 24,
+    visible: true,
+    fills: [{ type: 'SOLID', color: { r: 1, g: 0, b: 0 } }],
+  };
+  const group: FigNode = {
+    id: 'g1',
+    type: 'GROUP',
+    name: 'Group',
+    x: 30,
+    y: 40,
+    width: 100,
+    height: 80,
+    visible: true,
+    clipsContent: true,
+    children: [nested],
+  };
+  const frame = makeFrame('f1', 'Frame', [group]);
+  const doc = makeDoc({
+    pages: [{ id: 'p1', name: 'Page', children: [frame] }],
+  });
+
+  const svg = renderFig(doc).svgs.get('Frame')!;
+  assert.match(svg, /<clipPath id="clip_\d+"><rect x="30" y="40" width="100" height="80" \/><\/clipPath>/);
+  assert.ok(svg.includes('<rect x="42" y="58" width="40" height="24" fill="#ff0000"'));
 });
 
 test('renderFig: real image fill emits an <image> tag with the data URI', () => {
