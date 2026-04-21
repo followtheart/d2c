@@ -51,6 +51,8 @@ interface Args {
   splitFrames?: boolean;
   /** Run pipeline with stage-by-stage verification. */
   verify?: boolean;
+  /** Max concurrent workers for multi-page pipeline. */
+  multiPageConcurrency?: number;
   /** Directory to write per-stage snapshot JSON files. */
   verifyDir?: string;
   /** Directory containing per-stage snapshot JSON files to render. */
@@ -181,6 +183,16 @@ function parseArgs(argv: string[]): Args {
       case '--verify':
         args.verify = true;
         break;
+      case '--multi-page-workers':
+      case '--multi-page-concurrency': {
+        const rawValue = next();
+        const value = parseInt(rawValue, 10);
+        if (!Number.isFinite(value) || value < 1) {
+          throw new Error(`--multi-page-workers expects a positive integer, got ${rawValue}`);
+        }
+        args.multiPageConcurrency = value;
+        break;
+      }
       case '--verify-dir':
         args.verifyDir = next();
         args.verify = true; // implies --verify
@@ -317,6 +329,8 @@ Options:
                                  Implies --all-pages.
       --verify                     Run pipeline with stage-by-stage verification.
                                  Prints a verification report to stderr.
+      --multi-page-workers <n>     Max worker threads for --all-pages / multi-page
+                 pipeline. Defaults to available CPU cores.
       --verify-dir <dir>           Write per-stage snapshot JSON files to <dir>.
                                  Implies --verify.
       --render-snapshots <dir>     Render per-stage snapshot JSON files from
@@ -867,6 +881,7 @@ async function figmaApiCommand(args: Args): Promise<void> {
     format: 'native' as DesignFormat,
     platform: args.platform,
     verbose: args.verbose,
+    multiPageConcurrency: args.multiPageConcurrency,
     llm,
     componentLibrary: args.componentLibrary,
     responsiveVariants,
@@ -1194,7 +1209,7 @@ async function main(): Promise<void> {
   const isFigBuf = (Buffer.isBuffer(raw) || raw instanceof Uint8Array) &&
     (args.format === 'fig' || (args.format === 'auto' && args.input!.endsWith('.fig')));
   if (isFigBuf) {
-    const { parseFig, parseFigMultiPage, parseFigByFrames } = await import('./parser/figBinaryParser');
+    const { parseFig, parseFigMultiPage, parseFigByFrames, parseFigBinary, splitDocByFrames } = await import('./parser/figBinaryParser');
     console.error(`d2c: parsing .fig binary (${(raw as Buffer).length} bytes)…`);
     if (args.splitFrames) {
       const pages = await parseFigByFrames(raw as Buffer);
@@ -1207,9 +1222,27 @@ async function main(): Promise<void> {
       pipelineInput = { name: pages[0]?.name ?? 'Figma Design', pages };
       pipelineFormat = 'native';
     } else {
-      const ir = await parseFig(raw as Buffer);
-      pipelineInput = { name: ir.name, width: ir.width, height: ir.height, root: ir.root };
-      pipelineFormat = 'native';
+      // Auto-detect multi-frame pages: if the first page has multiple
+      // visible top-level FRAMEs, auto-split into separate pages so
+      // each frame renders independently instead of being mashed into
+      // one giant canvas.  Only split the first content page — skip
+      // Symbols / component-library pages.
+      const doc = await parseFigBinary(raw as Buffer);
+      const firstPage = doc.pages[0];
+      const visibleFrames = (firstPage?.children ?? []).filter(
+        (n) => n.type === 'FRAME' && n.visible !== false,
+      );
+      if (visibleFrames.length > 1) {
+        const pages = splitDocByFrames({ ...doc, pages: [firstPage] });
+        console.error(`d2c: auto-detected ${pages.length} frame(s), using multi-page mode`);
+        pipelineInput = { name: pages[0]?.name ?? 'Figma Design', pages };
+        pipelineFormat = 'native';
+        args.allPages = true;
+      } else {
+        const ir = await parseFig(raw as Buffer);
+        pipelineInput = { name: ir.name, width: ir.width, height: ir.height, root: ir.root };
+        pipelineFormat = 'native';
+      }
     }
   }
 
@@ -1235,6 +1268,7 @@ async function main(): Promise<void> {
     format: pipelineFormat,
     platform: args.platform,
     verbose: args.verbose,
+    multiPageConcurrency: args.multiPageConcurrency,
     llm,
     componentLibrary: args.componentLibrary,
     responsiveVariants,
@@ -1244,9 +1278,15 @@ async function main(): Promise<void> {
 
   // 多页面模式
   if (args.allPages) {
-    const multiResult = args.verify
-      ? await runMultiPagePipelineWithVerification(pipelineInput, pipelineOpts)
-      : await runMultiPagePipeline(pipelineInput, pipelineOpts);
+    let multiResult;
+    try {
+      multiResult = args.verify
+        ? await runMultiPagePipelineWithVerification(pipelineInput, pipelineOpts)
+        : await runMultiPagePipeline(pipelineInput, pipelineOpts);
+    } catch (err) {
+      console.error('d2c: multi-page pipeline error:', err);
+      process.exit(1);
+    }
     const { generated } = multiResult;
     const out = args.out ?? '-';
     if (out === '-') {

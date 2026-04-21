@@ -6,7 +6,11 @@ import { test } from 'node:test';
 import * as assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { runPipeline } from '../pipeline/d2cPipeline';
+import {
+  runMultiPagePipeline,
+  runMultiPagePipelineWithVerification,
+  runPipeline,
+} from '../pipeline/d2cPipeline';
 import { inferLayout } from '../layout/inference';
 import { parseNativeDesign, parseFigma } from '../parser';
 import type { IRNode } from '../ir/types';
@@ -14,6 +18,18 @@ import type { IRNode } from '../ir/types';
 function loadExample(name: string): unknown {
   const p = path.resolve(__dirname, '..', '..', 'examples', name);
   return JSON.parse(fs.readFileSync(p, 'utf8'));
+}
+
+function buildMultiPageExample(): unknown {
+  const desktop = loadExample('sample-design.json') as Record<string, unknown>;
+  const mobile = loadExample('sample-design-mobile.json') as Record<string, unknown>;
+  return {
+    name: 'MultiUserCard',
+    pages: [
+      desktop,
+      { ...mobile, name: 'UserCardMobile' },
+    ],
+  };
 }
 
 test('parses native design format', () => {
@@ -78,6 +94,33 @@ test('pipeline end-to-end: html output', async () => {
   assert.ok(html.includes('<!doctype html>'));
   assert.ok(html.includes('Ada Lovelace'));
   assert.ok(css.includes('display: flex'));
+});
+
+test('multi-page pipeline preserves page order and merges output', async () => {
+  const raw = buildMultiPageExample();
+  const result = await runMultiPagePipeline(raw, {
+    platform: 'html',
+    multiPageConcurrency: 2,
+  });
+
+  assert.equal(result.pages.length, 2);
+  assert.equal(result.pages[0].ir.name, 'UserCard');
+  assert.equal(result.pages[1].ir.name, 'UserCardMobile');
+  assert.equal(result.generated.entryFile, 'UserCard.html');
+  assert.ok(result.generated.files.some((file) => file.path === 'UserCard.html'));
+  assert.ok(result.generated.files.some((file) => file.path === 'UserCardMobile.html'));
+});
+
+test('multi-page verified pipeline returns verification for every page', async () => {
+  const raw = buildMultiPageExample();
+  const result = await runMultiPagePipelineWithVerification(raw, {
+    platform: 'html',
+    multiPageConcurrency: 2,
+  });
+
+  assert.equal(result.pages.length, 2);
+  assert.ok(result.pages.every((page) => page.verification.snapshots.length >= 4));
+  assert.ok(result.pages.every((page) => page.verification.status));
 });
 
 test('semantic enhancer: tags list is detected', async () => {

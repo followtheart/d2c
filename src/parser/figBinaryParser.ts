@@ -1029,6 +1029,11 @@ export async function parseFigMultiPage(buf: Buffer): Promise<IRDocument[]> {
 // contains multiple top-level frames, each representing a distinct web page / screen.
 export async function parseFigByFrames(buf: Buffer): Promise<IRDocument[]> {
   const doc = await parseFigBinary(buf);
+  return splitDocByFrames(doc);
+}
+
+// Split a pre-parsed FigDocument by top-level frames, avoiding double-parsing.
+export function splitDocByFrames(doc: FigDocument): IRDocument[] {
   if (doc.pages.length === 0) {
     throw new Error('No pages found in the .fig file');
   }
@@ -1038,7 +1043,6 @@ export async function parseFigByFrames(buf: Buffer): Promise<IRDocument[]> {
       (n) => n.type === 'FRAME' && n.visible !== false,
     );
     if (frames.length === 0) {
-      // No top-level frames — fall back to treating the whole page as one document
       results.push(pageToIRDocument(page, doc.name, doc.width, doc.height));
     } else {
       for (const frame of frames) {

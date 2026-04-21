@@ -7,6 +7,9 @@
  *   [Design tokens + optional Tailwind preset]
  */
 import type { IRDocument, IRMultiPageDocument } from '../ir/types';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { Worker } from 'node:worker_threads';
 import { parseDesign, parseDesignMultiPage, DesignFormat } from '../parser';
 import { inferLayout } from '../layout/inference';
 import { enhance, LLMProvider } from '../ai/semanticEnhancer';
@@ -42,6 +45,8 @@ export interface PipelineOptions {
   platform: Platform;
   llm?: LLMProvider;
   verbose?: boolean;
+  /** Max concurrent workers used by multi-page pipeline. Defaults to CPU count. */
+  multiPageConcurrency?: number;
   /** Match against a known component library (antd / mui). */
   componentLibrary?: LibraryTarget;
   /** Responsive variants (different viewports of the same design). */
@@ -63,6 +68,168 @@ export interface PipelineResult {
 
 function log(verbose: boolean | undefined, msg: string): void {
   if (verbose) console.error(msg);
+}
+
+type WorkerPipelineOptions = Omit<PipelineOptions, 'llm'> & { llm?: undefined };
+
+type MultiPageWorkerResult = PipelineResult | VerifiedPipelineResult;
+
+interface MultiPageWorkerSuccess {
+  ok: true;
+  result: MultiPageWorkerResult;
+}
+
+interface SerializedWorkerError {
+  name?: string;
+  message: string;
+  stack?: string;
+}
+
+interface MultiPageWorkerFailure {
+  ok: false;
+  error: SerializedWorkerError;
+}
+
+type MultiPageWorkerMessage = MultiPageWorkerSuccess | MultiPageWorkerFailure;
+
+function createPageRaw(page: IRDocument): IRDocument {
+  return {
+    name: page.name,
+    width: page.width,
+    height: page.height,
+    root: page.root,
+  };
+}
+
+function resolveMultiPageConcurrency(
+  opts: PipelineOptions,
+  pageCount: number,
+): number {
+  if (pageCount <= 1) return 1;
+  if (
+    typeof opts.multiPageConcurrency === 'number' &&
+    Number.isFinite(opts.multiPageConcurrency)
+  ) {
+    return Math.max(1, Math.min(pageCount, Math.floor(opts.multiPageConcurrency)));
+  }
+  const parallelism = typeof os.availableParallelism === 'function'
+    ? os.availableParallelism()
+    : os.cpus().length;
+  return Math.max(1, Math.min(pageCount, Math.max(1, parallelism - 1)));
+}
+
+function canUseMultiPageWorkers(opts: PipelineOptions): opts is WorkerPipelineOptions {
+  return opts.llm === undefined;
+}
+
+function toWorkerPipelineOptions(opts: PipelineOptions): WorkerPipelineOptions {
+  const { llm: _llm, ...rest } = opts;
+  return {
+    ...rest,
+    format: 'native',
+  };
+}
+
+function toWorkerError(error: SerializedWorkerError): Error {
+  const restored = new Error(error.message);
+  restored.name = error.name ?? 'Error';
+  if (error.stack) restored.stack = error.stack;
+  return restored;
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  async function runLoop(): Promise<void> {
+    while (true) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      if (currentIndex >= items.length) return;
+      results[currentIndex] = await worker(items[currentIndex], currentIndex);
+    }
+  }
+
+  const loops = Array.from(
+    { length: Math.max(1, Math.min(concurrency, items.length)) },
+    () => runLoop(),
+  );
+  await Promise.all(loops);
+  return results;
+}
+
+async function runPagePipelineInWorker(
+  pageRaw: IRDocument,
+  opts: WorkerPipelineOptions,
+  verify: boolean,
+): Promise<MultiPageWorkerResult> {
+  const workerPath = path.resolve(__dirname, 'multiPageWorker.js');
+  return new Promise<MultiPageWorkerResult>((resolve, reject) => {
+    let settled = false;
+    const worker = new Worker(workerPath, {
+      workerData: { pageRaw, opts, verify },
+    });
+
+    worker.once('message', (message: MultiPageWorkerMessage) => {
+      settled = true;
+      if (message.ok) {
+        resolve(message.result);
+        return;
+      }
+      reject(toWorkerError(message.error));
+    });
+
+    worker.once('error', (error) => {
+      settled = true;
+      reject(error);
+    });
+
+    worker.once('exit', (code) => {
+      if (!settled && code !== 0) {
+        reject(new Error(`Multi-page worker exited with code ${code}`));
+      }
+    });
+  });
+}
+
+async function runMultiPageTasks<Result extends MultiPageWorkerResult>(
+  pages: IRDocument[],
+  opts: PipelineOptions,
+  verify: boolean,
+): Promise<Result[]> {
+  const concurrency = resolveMultiPageConcurrency(opts, pages.length);
+  const useWorkers = canUseMultiPageWorkers(opts);
+
+  if (useWorkers) {
+    log(
+      opts.verbose,
+      `[multi] Running ${pages.length} page(s) with ${concurrency} worker thread(s)...`,
+    );
+    const workerOpts = toWorkerPipelineOptions(opts);
+    return mapWithConcurrency(pages, concurrency, async (page, index) => {
+      console.error(`d2c: [${index + 1}/${pages.length}] ${page.name}`);
+      const result = await runPagePipelineInWorker(createPageRaw(page), workerOpts, verify);
+      return result as Result;
+    });
+  }
+
+  log(
+    opts.verbose,
+    `[multi] LLM provider is not worker-serializable; running ${pages.length} page(s) with main-thread concurrency ${concurrency}...`,
+  );
+  return mapWithConcurrency(pages, concurrency, async (page, index) => {
+    console.error(`d2c: [${index + 1}/${pages.length}] ${page.name}`);
+    const pageRaw = createPageRaw(page);
+    const pageOpts = { ...opts, format: 'native' as DesignFormat };
+    const result = verify
+      ? await runPipelineWithVerification(pageRaw, pageOpts)
+      : await runPipeline(pageRaw, pageOpts);
+    return result as Result;
+  });
 }
 
 export async function runPipeline(
@@ -284,20 +451,11 @@ export async function runMultiPagePipeline(
     return { pages: [single], generated: single.generated };
   }
 
-  const pageResults: PipelineResult[] = [];
-  for (let i = 0; i < multiDoc.pages.length; i++) {
-    const page = multiDoc.pages[i];
-    console.error(`d2c: [${i + 1}/${multiDoc.pages.length}] ${page.name}`);
-    // 将单页面 IRDocument 包装为 raw input 再投入 pipeline
-    const pageRaw = {
-      name: page.name,
-      width: page.width,
-      height: page.height,
-      root: page.root,
-    };
-    const result = await runPipeline(pageRaw, { ...opts, format: 'native' });
-    pageResults.push(result);
-  }
+  const pageResults = await runMultiPageTasks<PipelineResult>(
+    multiDoc.pages,
+    opts,
+    false,
+  );
 
   log(opts.verbose, '[multi] Merging multi-page output...');
   const generator = createGenerator(opts.platform);
@@ -322,20 +480,11 @@ export async function runMultiPagePipelineWithVerification(
     return { pages: [single], generated: single.generated };
   }
 
-  const pageResults: VerifiedPipelineResult[] = [];
-  for (let i = 0; i < multiDoc.pages.length; i++) {
-    const page = multiDoc.pages[i];
-    console.error(`d2c: [${i + 1}/${multiDoc.pages.length}] ${page.name}`);
-    // 将单页面 IRDocument 包装为 raw input 再投入 pipeline
-    const pageRaw = {
-      name: page.name,
-      width: page.width,
-      height: page.height,
-      root: page.root,
-    };
-    const result = await runPipelineWithVerification(pageRaw, { ...opts, format: 'native' });
-    pageResults.push(result);
-  }
+  const pageResults = await runMultiPageTasks<VerifiedPipelineResult>(
+    multiDoc.pages,
+    opts,
+    true,
+  );
 
   log(opts.verbose, '[multi-verify] Merging multi-page output...');
   const generator = createGenerator(opts.platform);
