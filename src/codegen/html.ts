@@ -125,6 +125,13 @@ function tagFor(node: IRNode): string {
   }
 }
 
+function needsNonInteractiveWrapper(node: IRNode): boolean {
+  return node.children.some((child) => {
+    const childTag = tagFor(child);
+    return childTag === 'button' || childTag === 'a' || child.type === 'input' || child.semantics?.interactive === true;
+  });
+}
+
 export class HtmlGenerator extends CodeGenerator {
   readonly platform = 'html';
   private classIndex = new Map<string, string>();
@@ -155,6 +162,7 @@ ${body}
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow-x: hidden; }
 img { display: block; max-width: 100%; }
+  button, input { font: inherit; color: inherit; background: transparent; border: none; padding: 0; appearance: none; }
 
 ${this.classCss.join('\n\n')}
 `;
@@ -172,9 +180,10 @@ ${this.classCss.join('\n\n')}
   generateMultiPage(docs: IRDocument[]): GenerateResult {
     if (docs.length === 1) return this.generate(docs[0]);
     const allFiles: GeneratedFile[] = [];
+    const uniqueFiles = this.uniquePageDirs(docs.map((d, i) => d.name || `page_${i + 1}`));
     const pageNames = docs.map((d, i) => ({
       name: d.name || `Page ${i + 1}`,
-      file: `${this.safePageDir(d.name || `page_${i + 1}`)}.html`,
+      file: `${uniqueFiles[i]}.html`,
     }));
 
     // 所有页面共享一个 classIndex，生成共享 styles.css
@@ -191,7 +200,9 @@ ${this.classCss.join('\n\n')}
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow-x: hidden; }
 img { display: block; max-width: 100%; }
-.d2c-page-nav { display:flex; gap:16px; padding:12px 16px; background:#f5f5f5; border-bottom:1px solid #ddd; font-family:sans-serif; }
+button, input { font: inherit; color: inherit; background: transparent; border: none; padding: 0; appearance: none; }
+.d2c-page-nav { display:flex; flex-wrap:nowrap; gap:16px; padding:12px 16px; background:#f5f5f5; border-bottom:1px solid #ddd; font-family:sans-serif; overflow-x:auto; white-space:nowrap; align-items:center; }
+.d2c-page-nav a, .d2c-page-nav span { flex:0 0 auto; white-space:nowrap; }
 .d2c-page-nav a { text-decoration:none; color:#0066cc; }
 
 ${this.classCss.join('\n\n')}
@@ -272,6 +283,33 @@ ${pageBodies[i]}
     return name;
   }
 
+  private classForVisualInputText(node: IRNode): string {
+    const isTallField = typeof node.box.height === 'number' && node.box.height >= 120;
+    const props: Record<string, string> = {
+      position: 'absolute',
+      left: '16px',
+      color: '#7d8592',
+      'font-size': '14px',
+      'font-weight': '400',
+      'font-family': '"Nunito Sans", sans-serif',
+      'pointer-events': 'none',
+      'white-space': 'pre-line',
+    };
+    if (isTallField) {
+      props.top = '16px';
+      props.right = '16px';
+    } else {
+      props.top = '50%';
+      props.transform = 'translateY(-50%)';
+    }
+    const key = JSON.stringify(props);
+    if (this.classIndex.has(key)) return this.classIndex.get(key)!;
+    const name = `d2c-input-placeholder-${++this.classCounter}`;
+    this.classIndex.set(key, name);
+    this.classCss.push(`.${name} {\n${cssPropsToBlock(props, 2)}\n}`);
+    return name;
+  }
+
   private renderNode(
     node: IRNode,
     indent: number,
@@ -296,7 +334,11 @@ ${pageBodies[i]}
       return `${pad}<div class="${leafClass}" role="img" aria-label="${alt}"></div>`;
     }
 
-    const tag = tagFor(node);
+    const safeNativeInput = node.type === 'input' && node.layout.type !== 'absolute';
+    let tag = safeNativeInput ? 'input' : tagFor(node);
+    if ((tag === 'button' || tag === 'a') && needsNonInteractiveWrapper(node)) {
+      tag = 'div';
+    }
     const className = this.classFor(node, parentLayout, opts);
 
     // input 元素: 包含 label 和 input 子元素
@@ -316,6 +358,12 @@ ${pageBodies[i]}
       // PascalCase component names (e.g. "DateInput" -> "Date Input").
       const placeholderRaw = label || labelText || humanise(node.semantics?.componentName) || node.name || '';
       const placeholder = this.escapeText(placeholderRaw);
+      if (!safeNativeInput) {
+        if (!placeholder && !valueText) return `${pad}<div class="${className}"></div>`;
+        const visualText = valueText || placeholder;
+        const placeholderClass = this.classForVisualInputText(node);
+        return `${pad}<div class="${className}"><span class="${placeholderClass}">${visualText}</span></div>`;
+      }
       if (labelChild) {
         // 合并 border 样式到容器节点
         const wrapperNode = borderNode?.style?.border

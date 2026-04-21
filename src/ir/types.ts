@@ -68,6 +68,7 @@ export interface Style {
   border?: Border;
   shadows?: Shadow[];
   opacity?: number;
+  overflow?: 'hidden' | 'visible';
 }
 
 export interface TextStyle {

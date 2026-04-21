@@ -11,9 +11,10 @@ import {
   runMultiPagePipelineWithVerification,
   runPipeline,
 } from '../pipeline/d2cPipeline';
+import { HtmlGenerator } from '../codegen/html';
 import { inferLayout } from '../layout/inference';
 import { parseNativeDesign, parseFigma } from '../parser';
-import type { IRNode } from '../ir/types';
+import type { IRDocument, IRNode } from '../ir/types';
 
 function loadExample(name: string): unknown {
   const p = path.resolve(__dirname, '..', '..', 'examples', name);
@@ -64,6 +65,76 @@ test('layout inference: vertical stack detected for root', () => {
   assert.equal(laidOut.layout.direction, 'column');
 });
 
+test('layout inference: dashboard-like two-column canvas stays absolute', () => {
+  const root: IRNode = {
+    id: 'root',
+    name: 'Dashboard',
+    type: 'container',
+    box: { x: 0, y: 0, width: 360, height: 800 },
+    layout: { type: 'absolute' },
+    style: {},
+    children: [
+      {
+        id: 'header',
+        name: 'Header',
+        type: 'container',
+        box: { x: 10, y: 10, width: 340, height: 70 },
+        layout: { type: 'absolute' },
+        style: {},
+        children: [],
+      },
+      {
+        id: 'summary',
+        name: 'Summary',
+        type: 'container',
+        box: { x: 20, y: 100, width: 320, height: 120 },
+        layout: { type: 'absolute' },
+        style: {},
+        children: [],
+      },
+      {
+        id: 'left-1',
+        name: 'Left 1',
+        type: 'container',
+        box: { x: 30, y: 260, width: 145, height: 180 },
+        layout: { type: 'absolute' },
+        style: {},
+        children: [],
+      },
+      {
+        id: 'right-1',
+        name: 'Right 1',
+        type: 'container',
+        box: { x: 185, y: 260, width: 145, height: 180 },
+        layout: { type: 'absolute' },
+        style: {},
+        children: [],
+      },
+      {
+        id: 'left-2',
+        name: 'Left 2',
+        type: 'container',
+        box: { x: 30, y: 460, width: 145, height: 180 },
+        layout: { type: 'absolute' },
+        style: {},
+        children: [],
+      },
+      {
+        id: 'right-2',
+        name: 'Right 2',
+        type: 'container',
+        box: { x: 185, y: 460, width: 145, height: 180 },
+        layout: { type: 'absolute' },
+        style: {},
+        children: [],
+      },
+    ],
+  };
+
+  const laidOut = inferLayout(root);
+  assert.equal(laidOut.layout.type, 'absolute');
+});
+
 test('pipeline end-to-end: react output', async () => {
   const raw = loadExample('sample-design.json');
   const result = await runPipeline(raw, { platform: 'react' });
@@ -94,6 +165,193 @@ test('pipeline end-to-end: html output', async () => {
   assert.ok(html.includes('<!doctype html>'));
   assert.ok(html.includes('Ada Lovelace'));
   assert.ok(css.includes('display: flex'));
+});
+
+test('html codegen: clipped containers emit overflow hidden', () => {
+  const doc: IRDocument = {
+    name: 'Clipped Frame',
+    width: 200,
+    height: 120,
+    root: {
+      id: 'root',
+      name: 'Root',
+      type: 'container',
+      box: { x: 0, y: 0, width: 200, height: 120 },
+      layout: { type: 'absolute' },
+      style: { overflow: 'hidden', borderRadius: 20, backgroundColor: '#ffffff' },
+      children: [
+        {
+          id: 'drawer',
+          name: 'Drawer',
+          type: 'container',
+          box: { x: -40, y: 10, width: 120, height: 80 },
+          layout: { type: 'absolute' },
+          style: { backgroundColor: '#3f8cff' },
+          children: [],
+        },
+      ],
+    },
+  };
+
+  const result = new HtmlGenerator().generate(doc);
+  const css = result.files.find((file) => file.path === 'styles.css')!.content;
+
+  assert.match(css, /overflow: hidden;/);
+  assert.match(css, /border-radius: 20px;/);
+});
+
+test('html codegen: duplicate page names get unique filenames', () => {
+  const makeDoc = (name: string): IRDocument => ({
+    name,
+    width: 100,
+    height: 100,
+    root: {
+      id: `${name}-root`,
+      name,
+      type: 'container',
+      box: { x: 0, y: 0, width: 100, height: 100 },
+      layout: { type: 'absolute' },
+      style: {},
+      children: [],
+    },
+  });
+
+  const result = new HtmlGenerator().generateMultiPage([
+    makeDoc('Dashboard'),
+    makeDoc('Dashboard'),
+    makeDoc('Dashboard'),
+  ]);
+
+  const htmlFiles = result.files.filter((file) => file.path.endsWith('.html')).map((file) => file.path);
+  assert.deepEqual(htmlFiles, ['Dashboard.html', 'Dashboard_2.html', 'Dashboard_3.html']);
+  assert.equal(result.entryFile, 'Dashboard.html');
+});
+
+test('html codegen: multi-page nav stays single-row scrollable', () => {
+  const makeDoc = (name: string): IRDocument => ({
+    name,
+    width: 100,
+    height: 100,
+    root: {
+      id: `${name}-root`,
+      name,
+      type: 'container',
+      box: { x: 0, y: 0, width: 100, height: 100 },
+      layout: { type: 'absolute' },
+      style: {},
+      children: [],
+    },
+  });
+
+  const result = new HtmlGenerator().generateMultiPage([
+    makeDoc('Dashboard'),
+    makeDoc('Dashboard - add'),
+    makeDoc('Projects - List'),
+  ]);
+  const css = result.files.find((file) => file.path === 'styles.css')!.content;
+
+  assert.match(css, /\.d2c-page-nav \{[^}]*flex-wrap:nowrap;/);
+  assert.match(css, /\.d2c-page-nav \{[^}]*overflow-x:auto;/);
+  assert.match(css, /\.d2c-page-nav a, \.d2c-page-nav span \{[^}]*white-space:nowrap;/);
+});
+
+test('html codegen: absolute visual inputs do not emit native input controls', () => {
+  const doc: IRDocument = {
+    name: 'Visual Input',
+    width: 320,
+    height: 200,
+    root: {
+      id: 'root',
+      name: 'Root',
+      type: 'container',
+      box: { x: 0, y: 0, width: 320, height: 200 },
+      layout: { type: 'absolute' },
+      style: {},
+      children: [
+        {
+          id: 'field',
+          name: 'Input/withicon/right',
+          type: 'input',
+          box: { x: 20, y: 20, width: 280, height: 102 },
+          layout: { type: 'absolute' },
+          style: {},
+          children: [],
+          semantics: { componentName: 'InputWithiconRight', ariaLabel: 'Input with icon' },
+        },
+      ],
+    },
+  };
+
+  const result = new HtmlGenerator().generate(doc);
+  const html = result.files.find((file) => file.path === 'index.html')!.content;
+  const css = result.files.find((file) => file.path === 'styles.css')!.content;
+
+  assert.doesNotMatch(html, /<input[^>]*placeholder="Input with icon"/);
+  assert.match(html, /<div class="d2c-input-withicon-right-\d+"><span class="d2c-input-placeholder-\d+">Input with icon<\/span><\/div>/);
+  assert.match(css, /button, input \{[^}]*appearance: none;/);
+});
+
+test('html codegen: nested button-like nodes do not emit nested button tags', () => {
+  const doc: IRDocument = {
+    name: 'Nested Buttons',
+    width: 280,
+    height: 80,
+    root: {
+      id: 'root',
+      name: 'Root',
+      type: 'container',
+      box: { x: 0, y: 0, width: 280, height: 80 },
+      layout: { type: 'absolute' },
+      style: {},
+      children: [
+        {
+          id: 'outer',
+          name: 'Main Button',
+          type: 'container',
+          box: { x: 0, y: 0, width: 280, height: 48 },
+          layout: { type: 'absolute' },
+          style: {},
+          semantics: { role: 'button', componentName: 'MainButton', interactive: true },
+          children: [
+            {
+              id: 'inner',
+              name: 'elm/mainbutton',
+              type: 'container',
+              box: { x: 0, y: 0, width: 280, height: 48 },
+              layout: { type: 'absolute' },
+              style: { backgroundColor: '#3f8cff', borderRadius: 14 },
+              semantics: { role: 'button', componentName: 'ElmMainbutton', interactive: true },
+              children: [
+                {
+                  id: 'label',
+                  name: 'Save Event',
+                  type: 'text',
+                  box: { x: 47, y: 13, width: 186, height: 22 },
+                  layout: { type: 'absolute' },
+                  style: {},
+                  textStyle: {
+                    content: 'Save Event',
+                    fontSize: 16,
+                    fontWeight: 700,
+                    color: '#ffffff',
+                  },
+                  children: [],
+                  semantics: { role: 'heading', componentName: 'SaveEvent' },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  };
+
+  const result = new HtmlGenerator().generate(doc);
+  const html = result.files.find((file) => file.path === 'index.html')!.content;
+
+  assert.doesNotMatch(html, /<button[^>]*>\s*<button/);
+  assert.match(html, /<div class="d2c-main-button-\d+">/);
+  assert.match(html, /<button class="d2c-elm-mainbutton-\d+">Save Event<\/button>/);
 });
 
 test('multi-page pipeline preserves page order and merges output', async () => {

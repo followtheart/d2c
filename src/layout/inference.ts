@@ -62,6 +62,45 @@ function median(values: number[]): number {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
+function dominantAxisAlignmentRatio(
+  children: IRNode[],
+  parent: IRNode,
+  axis: 'row' | 'column',
+): number {
+  if (children.length <= 1) return 1;
+
+  const pw = numOr(parent.box.width, 0);
+  const ph = numOr(parent.box.height, 0);
+  const [pt, pr, pb, pl] = parent.box.padding ?? [0, 0, 0, 0];
+  const innerW = pw - pl - pr;
+  const innerH = ph - pt - pb;
+  const tolerance = EPS * 4;
+
+  const measures = axis === 'column'
+    ? {
+        starts: children.map((c) => c.box.x - pl),
+        ends: children.map((c) => innerW - (c.box.x - pl + numOr(c.box.width, 0))),
+        centers: children.map(
+          (c) => c.box.x - pl + numOr(c.box.width, 0) / 2 - innerW / 2,
+        ),
+      }
+    : {
+        starts: children.map((c) => c.box.y - pt),
+        ends: children.map((c) => innerH - (c.box.y - pt + numOr(c.box.height, 0))),
+        centers: children.map(
+          (c) => c.box.y - pt + numOr(c.box.height, 0) / 2 - innerH / 2,
+        ),
+      };
+
+  const ratios = [measures.starts, measures.ends, measures.centers].map((values) => {
+    const anchor = median(values);
+    const aligned = values.filter((value) => Math.abs(value - anchor) <= tolerance);
+    return aligned.length / children.length;
+  });
+
+  return Math.max(...ratios);
+}
+
 function inferCrossAlign(
   children: IRNode[],
   parent: IRNode,
@@ -280,9 +319,15 @@ function inferContainerLayout(node: IRNode): Layout {
 
     const yNonOverlapRatio = (totalPairs - yOverlapPairs) / totalPairs;
     const xNonOverlapRatio = (totalPairs - xOverlapPairs) / totalPairs;
+    const columnAlignmentRatio = dominantAxisAlignmentRatio(children, node, 'column');
+    const rowAlignmentRatio = dominantAxisAlignmentRatio(children, node, 'row');
 
     // If ≥60% of pairs are non-overlapping along an axis, use flex for that axis
-    if (yNonOverlapRatio >= 0.6 && yNonOverlapRatio >= xNonOverlapRatio) {
+    if (
+      yNonOverlapRatio >= 0.6 &&
+      yNonOverlapRatio >= xNonOverlapRatio &&
+      columnAlignmentRatio >= 0.7
+    ) {
       const sorted = [...children].sort((a, b) => a.box.y - b.box.y);
       const { justify, gap } = inferJustify(sorted, node, 'column');
       return {
@@ -293,7 +338,7 @@ function inferContainerLayout(node: IRNode): Layout {
         alignItems: inferCrossAlign(sorted, node, 'column'),
       };
     }
-    if (xNonOverlapRatio >= 0.6) {
+    if (xNonOverlapRatio >= 0.6 && rowAlignmentRatio >= 0.7) {
       const sorted = [...children].sort((a, b) => a.box.x - b.box.x);
       const { justify, gap } = inferJustify(sorted, node, 'row');
       return {

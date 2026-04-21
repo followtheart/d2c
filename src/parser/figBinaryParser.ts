@@ -874,6 +874,7 @@ function extractIRStyle(node: FigNode): Style {
     }));
   if (shadows.length) style.shadows = shadows;
   if (node.opacity !== undefined && node.opacity < 1) style.opacity = node.opacity;
+  if (node.clipsContent === true) style.overflow = 'hidden';
   return style;
 }
 

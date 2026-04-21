@@ -150,6 +150,9 @@ export function buildCssProps(
   if (style.opacity !== undefined && style.opacity < 1) {
     css.opacity = String(style.opacity);
   }
+  if (style.overflow) {
+    css.overflow = style.overflow;
+  }
 
   // Text
   if (textStyle) {
