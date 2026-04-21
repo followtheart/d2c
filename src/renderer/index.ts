@@ -201,3 +201,103 @@ export function renderFig(
   const html = renderToHtmlPreview(renderDoc, options);
   return { renderDoc, svgs, html };
 }
+
+export interface FigArtboardHtmlFile {
+  /** File name ending in .html (unique, filesystem-safe). */
+  fileName: string;
+  /** Original artboard/frame name as it appears in Figma. */
+  artboardName: string;
+  /** Self-contained HTML body that embeds the SVG for this frame. */
+  html: string;
+  /** The raw SVG string (without the outer HTML shell). */
+  svg: string;
+}
+
+function sanitizeFrameFileName(name: string): string {
+  return (name || 'frame')
+    .replace(/[^a-zA-Z0-9_\u4e00-\u9fff -]/g, '_')
+    .replace(/\s+/g, '_')
+    .replace(/^_+|_+$/g, '') || 'frame';
+}
+
+function escHtmlAttr(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/**
+ * Split-frames renderer: produces one standalone HTML file per top-level
+ * FRAME/SECTION, each embedding the high-fidelity SVG used by the preview
+ * flow. A shared top nav bar cross-links between frames.
+ *
+ * This is the fidelity-preserving counterpart to the `--split-frames`
+ * codegen path: it bypasses semantic enhancement and emits pixel-faithful
+ * output that matches `renderFig()`'s preview quality.
+ */
+export function renderFigArtboards(
+  figDoc: FigDocument,
+  options?: FigRenderOptions,
+): FigArtboardHtmlFile[] {
+  const { renderDoc } = buildFigRenderTree(figDoc, options);
+  const scale = options?.scale ?? 1;
+
+  const nameCounts = new Map<string, number>();
+  const entries = renderDoc.artboards.map((ab) => {
+    const base = sanitizeFrameFileName(ab.name);
+    const count = (nameCounts.get(base) ?? 0) + 1;
+    nameCounts.set(base, count);
+    const fileName = count === 1 ? `${base}.html` : `${base}_${count}.html`;
+    const svg = renderArtboardToSvg(ab, options);
+    return { ab, fileName, svg };
+  });
+
+  const results: FigArtboardHtmlFile[] = [];
+  for (let i = 0; i < entries.length; i++) {
+    const { ab, fileName, svg } = entries[i];
+    const w = Math.round(ab.frame.width * scale);
+    const h = Math.round(ab.frame.height * scale);
+    const nav = entries
+      .map((e, j) =>
+        j === i
+          ? `      <span class="current">${escHtmlAttr(e.ab.name)}</span>`
+          : `      <a href="${e.fileName}">${escHtmlAttr(e.ab.name)}</a>`,
+      )
+      .join('\n');
+    const bg = ab.backgroundColor ?? '#ffffff';
+    const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>${escHtmlAttr(ab.name)}</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; color: #222; }
+  .d2c-frame-nav { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: nowrap; gap: 12px; padding: 10px 16px; background: #ffffff; border-bottom: 1px solid #e4e4e4; overflow-x: auto; white-space: nowrap; font-size: 13px; }
+  .d2c-frame-nav a { color: #0066cc; text-decoration: none; flex: 0 0 auto; }
+  .d2c-frame-nav a:hover { text-decoration: underline; }
+  .d2c-frame-nav .current { font-weight: 600; color: #222; flex: 0 0 auto; }
+  .d2c-frame-stage { display: flex; justify-content: center; padding: 32px 16px; }
+  .d2c-frame-canvas { width: ${w}px; height: ${h}px; background: ${bg}; box-shadow: 0 1px 4px rgba(0,0,0,0.1); overflow: hidden; }
+  .d2c-frame-canvas > svg { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+  <nav class="d2c-frame-nav">
+${nav}
+  </nav>
+  <main class="d2c-frame-stage">
+    <div class="d2c-frame-canvas">
+      ${svg}
+    </div>
+  </main>
+</body>
+</html>
+`;
+    results.push({ fileName, artboardName: ab.name, html, svg });
+  }
+  return results;
+}

@@ -1211,6 +1211,34 @@ async function main(): Promise<void> {
   if (isFigBuf) {
     const { parseFig, parseFigMultiPage, parseFigByFrames, parseFigBinary, splitDocByFrames } = await import('./parser/figBinaryParser');
     console.error(`d2c: parsing .fig binary (${(raw as Buffer).length} bytes)…`);
+
+    // High-fidelity split-frames HTML: reuse the preview engine to emit one
+    // standalone HTML per top-level FRAME, preserving gradients, shadows,
+    // image fills, per-corner radii, rotation, etc. — bypasses the lossy
+    // IR-based codegen entirely.
+    if (args.splitFrames && args.platform === 'html') {
+      const figDoc = await parseFigBinary(raw as Buffer);
+      const { renderFigArtboards } = await import('./renderer');
+      const files = renderFigArtboards(figDoc, { scale: args.renderScale ?? 1 });
+      console.error(`d2c: rendered ${files.length} frame(s) from .fig file (high-fidelity)`);
+      const out = args.out ?? '-';
+      if (out === '-') {
+        for (const f of files) {
+          console.log(`<!-- ===== ${f.fileName} ===== -->`);
+          console.log(f.html);
+        }
+      } else {
+        fs.mkdirSync(out, { recursive: true });
+        for (const f of files) {
+          const full = path.join(out, f.fileName);
+          fs.writeFileSync(full, f.html);
+          if (args.verbose) console.error(`wrote ${full}`);
+        }
+        console.error(`d2c: generated ${files.length} HTML file(s) → ${out} (entry: ${files[0]?.fileName ?? ''})`);
+      }
+      return;
+    }
+
     if (args.splitFrames) {
       const pages = await parseFigByFrames(raw as Buffer);
       console.error(`d2c: extracted ${pages.length} frame(s) from .fig file`);
