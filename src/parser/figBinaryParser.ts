@@ -297,6 +297,32 @@ type KObj = Record<string, unknown>;
 function str(v: unknown): string { return typeof v === 'string' ? v : ''; }
 function num(v: unknown): number { return typeof v === 'number' ? v : 0; }
 
+export function normalizeFigLineHeight(
+  rawLineHeight: unknown,
+  fontSize: number,
+): number | undefined {
+  if (!rawLineHeight || typeof rawLineHeight !== 'object' || Array.isArray(rawLineHeight)) {
+    return undefined;
+  }
+
+  const lineHeight = rawLineHeight as KObj;
+  const units = str(lineHeight.units).toUpperCase();
+  const value = lineHeight.value;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    return undefined;
+  }
+
+  if (units === 'AUTO') return undefined;
+  if (value <= 4) {
+    return Math.round(fontSize * value * 100) / 100;
+  }
+  if (units === 'PERCENT') {
+    return Math.round(fontSize * value) / 100;
+  }
+
+  return value;
+}
+
 function guidKey(guid: unknown): string {
   if (!guid || typeof guid !== 'object') return '';
   const g = guid as KObj;
@@ -612,16 +638,12 @@ function nodeChangeToFigNode(nc: KObj): FigNode {
     node.fontSize = nc.fontSize !== undefined ? num(nc.fontSize) : 14;
     node.fontWeight = fontName?.style ? fontWeightFromStyle(str(fontName.style)) : 400;
     if (nc.lineHeight !== undefined) {
-      const lh = nc.lineHeight as KObj;
-      const lhUnits = str(lh.units);
-      if (lhUnits === 'PERCENT') {
-        // Convert percentage to pixels: fontSize × (value / 100)
-        const fs = nc.fontSize !== undefined ? num(nc.fontSize) : 14;
-        node.lineHeightPx = Math.round(fs * num(lh.value) / 100);
-      } else if (lhUnits === 'AUTO' || lhUnits === 'auto') {
-        // Auto line-height: omit to let browser use default
-      } else if (lh.value !== undefined) {
-        node.lineHeightPx = num(lh.value);
+      const resolvedLineHeight = normalizeFigLineHeight(
+        nc.lineHeight,
+        node.fontSize ?? 14,
+      );
+      if (resolvedLineHeight !== undefined) {
+        node.lineHeightPx = resolvedLineHeight;
       }
     }
     if (nc.letterSpacing !== undefined) {

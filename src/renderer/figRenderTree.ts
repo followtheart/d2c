@@ -289,6 +289,87 @@ function resolveBorderRadius(
 interface ConvertCtx {
   options: FigRenderOptions;
   resolver: ImageResolver;
+  componentMasters: Map<string, FigNode>;
+}
+
+function collectComponentMasters(nodes: FigNode[] | undefined, out: Map<string, FigNode>): void {
+  for (const node of nodes ?? []) {
+    if ((node.type === 'COMPONENT' || node.type === 'COMPONENT_SET') && node.name && !out.has(node.name)) {
+      out.set(node.name, node);
+    }
+    collectComponentMasters(node.children, out);
+  }
+}
+
+function scaleRenderNode(node: RenderNode, scaleX: number, scaleY: number): RenderNode {
+  const uniformScale = (scaleX + scaleY) / 2;
+  return {
+    ...node,
+    frame: {
+      x: node.frame.x * scaleX,
+      y: node.frame.y * scaleY,
+      width: node.frame.width * scaleX,
+      height: node.frame.height * scaleY,
+    },
+    borderRadius: Array.isArray(node.borderRadius)
+      ? [
+          node.borderRadius[0] * uniformScale,
+          node.borderRadius[1] * uniformScale,
+          node.borderRadius[2] * uniformScale,
+          node.borderRadius[3] * uniformScale,
+        ]
+      : typeof node.borderRadius === 'number'
+        ? node.borderRadius * uniformScale
+        : undefined,
+    borders: node.borders.map((border) => ({
+      ...border,
+      thickness: border.thickness * uniformScale,
+    })),
+    shadows: node.shadows.map((shadow) => ({
+      ...shadow,
+      x: shadow.x * scaleX,
+      y: shadow.y * scaleY,
+      blur: shadow.blur * uniformScale,
+      spread: shadow.spread * uniformScale,
+    })),
+    innerShadows: node.innerShadows.map((shadow) => ({
+      ...shadow,
+      x: shadow.x * scaleX,
+      y: shadow.y * scaleY,
+      blur: shadow.blur * uniformScale,
+      spread: shadow.spread * uniformScale,
+    })),
+    blur: node.blur
+      ? { ...node.blur, radius: node.blur.radius * uniformScale }
+      : undefined,
+    text: node.text
+      ? {
+          ...node.text,
+          runs: node.text.runs.map((run) => ({
+            ...run,
+            style: {
+              ...run.style,
+              fontSize: run.style.fontSize * uniformScale,
+              lineHeight: run.style.lineHeight !== undefined
+                ? run.style.lineHeight * uniformScale
+                : undefined,
+              letterSpacing: run.style.letterSpacing !== undefined
+                ? run.style.letterSpacing * uniformScale
+                : undefined,
+            },
+          })),
+        }
+      : undefined,
+    children: node.children.map((child) => scaleRenderNode(child, scaleX, scaleY)),
+  };
+}
+
+function resolveInstanceChildren(node: FigNode, ctx: ConvertCtx): FigNode[] {
+  if ((node.children?.length ?? 0) > 0) return node.children ?? [];
+  if (node.type !== 'INSTANCE') return [];
+  const master = ctx.componentMasters.get(node.name);
+  if (!master || master === node) return [];
+  return master.children ?? [];
 }
 
 function absolutizeNode(node: RenderNode, parentX = 0, parentY = 0): RenderNode {
@@ -327,11 +408,24 @@ function convertNode(node: FigNode, ctx: ConvertCtx, isRoot: boolean): RenderNod
   const { shadows, innerShadows, blur } = convertEffects(node.effects);
 
   // Children
+  const sourceChildren = resolveInstanceChildren(node, ctx);
   const children: RenderNode[] = [];
-  for (const c of node.children ?? []) {
+  for (const c of sourceChildren) {
     if (!ctx.options.includeHidden && c.visible === false) continue;
     children.push(convertNode(c, ctx, false));
   }
+
+  const scaledChildren =
+    node.type === 'INSTANCE' && (node.children?.length ?? 0) === 0 && sourceChildren.length > 0
+      ? (() => {
+          const master = ctx.componentMasters.get(node.name);
+          const masterWidth = Math.max(master?.width ?? node.width, 1);
+          const masterHeight = Math.max(master?.height ?? node.height, 1);
+          const scaleX = node.width / masterWidth;
+          const scaleY = node.height / masterHeight;
+          return children.map((child) => scaleRenderNode(child, scaleX, scaleY));
+        })()
+      : children;
 
   // Root frames are normalized to the artboard origin. Descendants keep the
   // parent-relative coordinates from the .fig transform and are converted to
@@ -367,7 +461,7 @@ function convertNode(node: FigNode, ctx: ConvertCtx, isRoot: boolean): RenderNod
     innerShadows,
     blur,
     borderRadius: resolveBorderRadius(node),
-    children,
+    children: scaledChildren,
     text: convertText(node),
     imageRef,
     sketchClass: node.type.toLowerCase(),
@@ -501,12 +595,17 @@ export function buildFigRenderTree(
   };
   const resolver = new ImageResolver(doc.images ?? new Map(), true);
   const perFrame = opts.perFrameArtboards !== false;
+  const componentMasters = new Map<string, FigNode>();
+  for (const page of doc.pages) {
+    collectComponentMasters(page.children, componentMasters);
+  }
 
   const artboards: RenderArtboard[] = [];
   for (const page of doc.pages) {
     const ctx: ConvertCtx = {
       options: opts,
       resolver,
+      componentMasters,
     };
     artboards.push(...pageToArtboards(page, ctx, perFrame));
   }

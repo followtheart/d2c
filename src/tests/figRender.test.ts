@@ -14,6 +14,7 @@ import type {
   FigNode,
   FigImageAsset,
 } from '../parser/figBinaryParser';
+import { normalizeFigLineHeight } from '../parser/figBinaryParser';
 import { buildFigRenderTree } from '../renderer/figRenderTree';
 import { renderArtboardToSvg } from '../renderer/svgRenderer';
 import { renderFig } from '../renderer';
@@ -89,6 +90,62 @@ test('figRenderTree: top-level components are skipped in per-frame preview mode'
   const { renderDoc } = buildFigRenderTree(doc);
   assert.equal(renderDoc.artboards.length, 1);
   assert.equal(renderDoc.artboards[0].name, 'Home');
+});
+
+test('figRenderTree: instance falls back to same-named component children and scales them', () => {
+  const master: FigNode = {
+    id: 'c-facebook',
+    type: 'COMPONENT',
+    name: 'Facebook',
+    x: 0,
+    y: 0,
+    width: 32,
+    height: 32,
+    visible: true,
+    children: [{
+      id: 'c-bg',
+      type: 'ELLIPSE',
+      name: 'bg',
+      x: 2,
+      y: 2,
+      width: 28,
+      height: 28,
+      visible: true,
+      fills: [{ type: 'SOLID', color: { r: 0.53, g: 0.16, b: 1 } }],
+    }],
+  };
+  const instance: FigNode = {
+    id: 'i-facebook',
+    type: 'INSTANCE',
+    name: 'Facebook',
+    x: 100,
+    y: 50,
+    width: 54,
+    height: 54,
+    visible: true,
+  };
+  const frame = makeFrame('f1', 'Frame', [instance]);
+  const doc = makeDoc({
+    pages: [
+      { id: 'p1', name: 'Screen', children: [frame] },
+      { id: 'p2', name: 'Internal Only Canvas', children: [master] },
+    ],
+  });
+
+  const { renderDoc } = buildFigRenderTree(doc);
+  const renderedInstance = renderDoc.artboards[0].root.children[0];
+  assert.equal(renderedInstance.type, 'symbolInstance');
+  assert.equal(renderedInstance.children.length, 1);
+  assert.equal(renderedInstance.children[0].type, 'oval');
+  assert.equal(renderedInstance.children[0].frame.x, 103.375);
+  assert.equal(renderedInstance.children[0].frame.width, 47.25);
+});
+
+test('fig parser: normalizes unitless line-height multipliers from .fig text nodes', () => {
+  assert.equal(normalizeFigLineHeight({ value: 1.6 }, 18), 28.8);
+  assert.equal(normalizeFigLineHeight({ units: 'PERCENT', value: 160 }, 18), 28.8);
+  assert.equal(normalizeFigLineHeight({ units: 'AUTO', value: 1.2 }, 18), undefined);
+  assert.equal(normalizeFigLineHeight({ value: 24 }, 18), 24);
 });
 
 test('figRenderTree: loose top-level shapes packed into one artboard', () => {

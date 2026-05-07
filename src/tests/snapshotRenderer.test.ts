@@ -73,14 +73,17 @@ test('tokensRenderer: produces valid HTML from tokens snapshot', () => {
 
 // ── Codegen renderer ─────────────────────────────────────────────────
 
-test('codegenRenderer: produces valid HTML from codegen snapshot', () => {
+test('codegenRenderer: emits raw html codegen entry with inlined css', () => {
   const snap = loadSnapshot('codegen');
   const html = codegenRenderer.render(snap);
-  assert.ok(html.includes('<!DOCTYPE html>'));
-  assert.ok(html.includes('codegen'));
-  assert.ok(html.includes('Codegen summary'), 'should contain summary');
-  assert.ok(html.includes('cg-tab'), 'should contain file tabs');
-  assert.ok(html.includes('index.html'), 'should list entry file');
+  assert.ok(/<!doctype html>/i.test(html), 'should be a full HTML page');
+  assert.ok(html.includes('<body'), 'should contain body tag');
+  // 样式应被内联进 <style>，而不是通过 <link rel="stylesheet" href="styles.css"> 引用
+  assert.ok(/<style[\s\S]*?<\/style>/.test(html), 'stylesheet should be inlined');
+  assert.ok(
+    !/<link\s+[^>]*rel=["']stylesheet["'][^>]*href=["']styles\.css["']/.test(html),
+    'should not keep external stylesheet link',
+  );
 });
 
 // ── Renderer map ─────────────────────────────────────────────────────
