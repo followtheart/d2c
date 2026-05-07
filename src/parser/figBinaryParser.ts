@@ -438,6 +438,183 @@ export interface FigPage {
   children: FigNode[];
 }
 
+interface ComponentRegistry {
+  exact: Map<string, FigNode>;
+  variantSets: Map<string, FigNode[]>;
+}
+
+function normalizeComponentToken(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function componentVariantLabel(name: string): string {
+  const eq = name.lastIndexOf('=');
+  return normalizeComponentToken(eq >= 0 ? name.slice(eq + 1) : name);
+}
+
+function variantHintTokens(instance: FigNode, parent?: FigNode): string[] {
+  const raw = [instance.name, parent?.name ?? ''].join(' ');
+  const normalized = normalizeComponentToken(raw);
+  const tokens = normalized ? normalized.split(/\s+/) : [];
+  if (tokens.includes('password')) tokens.push('lock');
+  if (tokens.includes('gmail')) tokens.push('google');
+  return tokens;
+}
+
+function collectComponentRegistry(pages: FigPage[]): ComponentRegistry {
+  const exact = new Map<string, FigNode>();
+  const variantSets = new Map<string, FigNode[]>();
+
+  function walk(node: FigNode): void {
+    if ((node.type === 'COMPONENT' || node.type === 'COMPONENT_SET') && node.name && !exact.has(node.name)) {
+      exact.set(node.name, node);
+    }
+
+    const componentChildren = (node.children ?? []).filter(
+      (child) => child.type === 'COMPONENT' || child.type === 'COMPONENT_SET',
+    );
+    if (node.name && componentChildren.length > 0 && !variantSets.has(node.name)) {
+      variantSets.set(node.name, componentChildren);
+    }
+
+    for (const child of node.children ?? []) walk(child);
+  }
+
+  for (const page of pages) {
+    for (const child of page.children ?? []) walk(child);
+  }
+  return { exact, variantSets };
+}
+
+function sizeDelta(a: FigNode, b: FigNode): number {
+  return Math.abs(a.width - b.width) + Math.abs(a.height - b.height);
+}
+
+function chooseVariantMaster(
+  instance: FigNode,
+  variants: FigNode[],
+  parent: FigNode | undefined,
+  siblingOrdinal: number | undefined,
+  siblingCount: number,
+): FigNode | undefined {
+  if (variants.length === 0) return undefined;
+
+  if (siblingCount > 1 && siblingOrdinal !== undefined && siblingOrdinal < variants.length) {
+    return variants[siblingOrdinal];
+  }
+
+  const hintTokens = variantHintTokens(instance, parent);
+  let bestByHint: FigNode | undefined;
+  let bestHintScore = 0;
+  for (const variant of variants) {
+    const labelTokens = componentVariantLabel(variant.name).split(/\s+/).filter(Boolean);
+    const score = labelTokens.filter((token) => hintTokens.includes(token)).length;
+    if (score > bestHintScore) {
+      bestHintScore = score;
+      bestByHint = variant;
+    }
+  }
+  if (bestByHint) return bestByHint;
+
+  return variants.reduce((best, candidate) => (
+    sizeDelta(instance, candidate) < sizeDelta(instance, best) ? candidate : best
+  ), variants[0]);
+}
+
+function resolveInstanceMaster(
+  instance: FigNode,
+  registry: ComponentRegistry,
+  parent?: FigNode,
+  siblingOrdinal?: number,
+  siblingCount = 1,
+): FigNode | undefined {
+  const exact = registry.exact.get(instance.name);
+  if (exact && exact !== instance) return exact;
+
+  const variants = registry.variantSets.get(instance.name);
+  if (!variants) return undefined;
+  return chooseVariantMaster(instance, variants, parent, siblingOrdinal, siblingCount);
+}
+
+function cloneNodeForInstance(node: FigNode, prefix: string, scaleX: number, scaleY: number): FigNode {
+  const uniformScale = (scaleX + scaleY) / 2;
+  return {
+    ...node,
+    id: `${prefix}/${node.id}`,
+    x: node.x * scaleX,
+    y: node.y * scaleY,
+    width: node.width * scaleX,
+    height: node.height * scaleY,
+    cornerRadius: node.cornerRadius !== undefined ? node.cornerRadius * uniformScale : undefined,
+    rectangleCornerRadii: node.rectangleCornerRadii
+      ? [
+          node.rectangleCornerRadii[0] * uniformScale,
+          node.rectangleCornerRadii[1] * uniformScale,
+          node.rectangleCornerRadii[2] * uniformScale,
+          node.rectangleCornerRadii[3] * uniformScale,
+        ]
+      : undefined,
+    strokeWeight: node.strokeWeight !== undefined ? node.strokeWeight * uniformScale : undefined,
+    fontSize: node.fontSize !== undefined ? node.fontSize * uniformScale : undefined,
+    lineHeightPx: node.lineHeightPx !== undefined ? node.lineHeightPx * uniformScale : undefined,
+    letterSpacing: node.letterSpacing !== undefined ? node.letterSpacing * uniformScale : undefined,
+    effects: node.effects?.map((effect) => ({
+      ...effect,
+      radius: effect.radius !== undefined ? effect.radius * uniformScale : undefined,
+      spread: effect.spread !== undefined ? effect.spread * uniformScale : undefined,
+      offset: effect.offset
+        ? { x: effect.offset.x * scaleX, y: effect.offset.y * scaleY }
+        : undefined,
+    })),
+    children: node.children?.map((child) => cloneNodeForInstance(child, prefix, scaleX, scaleY)),
+  };
+}
+
+function hydrateInstancesInTree(pages: FigPage[]): void {
+  const registry = collectComponentRegistry(pages);
+  const resolving = new Set<string>();
+
+  function hydrateNode(node: FigNode, parent?: FigNode, siblingOrdinal?: number, siblingCount = 1): void {
+    if (node.type === 'INSTANCE' && (node.children?.length ?? 0) === 0) {
+      const master = resolveInstanceMaster(node, registry, parent, siblingOrdinal, siblingCount);
+      if (master && master !== node && !resolving.has(master.id)) {
+        resolving.add(master.id);
+        const scaleX = node.width / Math.max(master.width, 1);
+        const scaleY = node.height / Math.max(master.height, 1);
+        node.children = (master.children ?? []).map((child) => cloneNodeForInstance(child, node.id, scaleX, scaleY));
+        resolving.delete(master.id);
+      }
+    }
+
+    const children = node.children ?? [];
+    const grouped = new Map<string, FigNode[]>();
+    for (const child of children) {
+      if (child.type === 'INSTANCE' && (child.children?.length ?? 0) === 0) {
+        const list = grouped.get(child.name) ?? [];
+        list.push(child);
+        grouped.set(child.name, list);
+      }
+    }
+
+    for (const child of children) {
+      const group = grouped.get(child.name);
+      hydrateNode(
+        child,
+        node,
+        group ? group.indexOf(child) : undefined,
+        group?.length ?? 1,
+      );
+    }
+  }
+
+  for (const page of pages) {
+    for (const child of page.children ?? []) hydrateNode(child);
+  }
+}
+
 /* ── NodeChange → FigNode Tree ───────────────────────────────────────── */
 
 // Map type enum strings to normalized type names
@@ -779,6 +956,8 @@ function buildNodeTree(
     if (first.height > 0) height = first.height;
   }
 
+  hydrateInstancesInTree(pages);
+
   return { name: docName, pages, width, height, images, thumbnail };
 }
 
@@ -863,17 +1042,54 @@ function mapNodeType(node: FigNode): IRNodeType {
   }
 }
 
+function gradientPaintToCss(paint: FigPaint): string | undefined {
+  if (!paint.type.startsWith('GRADIENT_') || !paint.gradientStops?.length) return undefined;
+  const stops = [...paint.gradientStops]
+    .sort((a, b) => a.position - b.position)
+    .map((stop) => {
+      const color = anyColorToCss({
+        ...stop.color,
+        a: (stop.color.a ?? 1) * (paint.opacity ?? 1),
+      }) ?? '#000000';
+      return `${color} ${Math.round(stop.position * 1000) / 10}%`;
+    });
+  if (paint.type === 'GRADIENT_RADIAL') {
+    return `radial-gradient(circle, ${stops.join(', ')})`;
+  }
+  const handles = paint.gradientHandlePositions;
+  let angle = 180;
+  if (handles && handles.length >= 2) {
+    const dx = handles[1].x - handles[0].x;
+    const dy = handles[1].y - handles[0].y;
+    angle = Math.round((Math.atan2(dy, dx) * 180) / Math.PI + 90);
+  }
+  return `linear-gradient(${angle}deg, ${stops.join(', ')})`;
+}
+
 function extractIRStyle(node: FigNode): Style {
   const style: Style = {};
+  const gradientFill = node.fills?.find((f) => f.visible !== false && f.type.startsWith('GRADIENT_'));
+  if (gradientFill) {
+    const gradient = gradientPaintToCss(gradientFill);
+    if (gradient) style.backgroundImage = gradient;
+  }
   const solidFill = node.fills?.find((f) => f.visible !== false && (f.type === 'SOLID' || f.color));
-  if (solidFill?.color) {
+  if (!style.backgroundImage && solidFill?.color) {
     const base = anyColorToCss({
       ...solidFill.color,
       a: (solidFill.color.a ?? 1) * (solidFill.opacity ?? 1),
     });
     if (base) style.backgroundColor = base;
   }
-  if (node.cornerRadius !== undefined) style.borderRadius = node.cornerRadius;
+  const hasFullEllipseChild = node.children?.some(
+    (child) => child.type === 'ELLIPSE' &&
+      Math.abs(child.width - node.width) < 1 &&
+      Math.abs(child.height - node.height) < 1,
+  );
+  if (node.type === 'ELLIPSE' || (node.type === 'BOOLEAN_OPERATION' && hasFullEllipseChild)) {
+    style.borderRadius = Math.min(node.width, node.height) / 2;
+  }
+  else if (node.cornerRadius !== undefined) style.borderRadius = node.cornerRadius;
   else if (node.rectangleCornerRadii) style.borderRadius = node.rectangleCornerRadii;
 
   const strokeFill = node.strokes?.find((f) => f.visible !== false && (f.type === 'SOLID' || f.color));
@@ -948,7 +1164,14 @@ function extractIRBox(node: FigNode): Box {
   return { x: node.x, y: node.y, width: node.width, height: node.height, padding };
 }
 
-function figNodeToIR(node: FigNode): IRNode {
+function shouldSkipApproximateChild(node: FigNode, parent?: FigNode): boolean {
+  if (parent?.type !== 'BOOLEAN_OPERATION' || node.type !== 'VECTOR') return false;
+  const hasVisibleFill = node.fills?.some((fill) => fill.visible !== false);
+  if (hasVisibleFill) return false;
+  return (node.strokeWeight ?? 0) > 4;
+}
+
+function figNodeToIR(node: FigNode, parent?: FigNode): IRNode {
   const type = mapNodeType(node);
   const assetRef = node.fills?.find((f) => f.type === 'IMAGE')?.imageRef;
   const style = extractIRStyle(node);
@@ -969,7 +1192,8 @@ function figNodeToIR(node: FigNode): IRNode {
     assetRef,
     children: (node.children ?? [])
       .filter((c) => c.visible !== false)
-      .map((c) => figNodeToIR(c)),
+      .filter((c) => !shouldSkipApproximateChild(c, node))
+      .map((c) => figNodeToIR(c, node)),
   };
 }
 

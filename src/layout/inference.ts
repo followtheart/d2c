@@ -234,6 +234,15 @@ function inferContainerLayout(node: IRNode): Layout {
   if (node.layout.type === 'flex' || node.layout.type === 'grid')
     return node.layout;
 
+  if (
+    node.layout.type === 'absolute' &&
+    node.layout.confidence !== undefined &&
+    node.layout.confidence <= 0.25 &&
+    (node.style.backgroundImage || node.style.overflow === 'hidden')
+  ) {
+    return node.layout;
+  }
+
   if (children.length === 0)
     return { type: 'flex', direction: 'column', confidence: 1, source: 'rule-engine' };
   if (children.length === 1)

@@ -60,9 +60,12 @@ function collectCandidates(
   function walk(node: IRNode): void {
     if (node.children.length >= minChildren) {
       const conf = node.layout.confidence ?? 1;
-      if (node.layout.type === 'absolute') {
+      const shouldPreserveAbsolute =
+        node.layout.type === 'absolute' &&
+        (node.style.backgroundImage || node.style.overflow === 'hidden');
+      if (node.layout.type === 'absolute' && !shouldPreserveAbsolute) {
         out.push({ node, reason: 'absolute-fallback' });
-      } else if (conf < threshold) {
+      } else if (!shouldPreserveAbsolute && conf < threshold) {
         out.push({ node, reason: 'low-confidence' });
       }
     }

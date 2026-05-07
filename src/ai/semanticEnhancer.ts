@@ -135,6 +135,9 @@ function mergeOverlappingSiblings(node: IRNode): IRNode {
 // 检测名称中包含 input / field 的容器
 function isInputLike(node: IRNode): boolean {
   if (node.type !== 'container') return false;
+  const h = typeof node.box.height === 'number' ? node.box.height : Infinity;
+  if (h > 80) return false;
+  if (/input\s+type/i.test(node.name)) return false;
   return /input|textfield|text.?field/i.test(node.name);
 }
 
