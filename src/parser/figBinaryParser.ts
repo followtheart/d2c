@@ -539,9 +539,19 @@ function resolveInstanceMaster(
   return chooseVariantMaster(instance, variants, parent, siblingOrdinal, siblingCount);
 }
 
-function cloneNodeForInstance(node: FigNode, prefix: string, scaleX: number, scaleY: number): FigNode {
+function cloneNodeForInstance(
+  node: FigNode,
+  prefix: string,
+  scaleX: number,
+  scaleY: number,
+  seen = new WeakSet<object>(),
+  depth = 0,
+): FigNode {
   const uniformScale = (scaleX + scaleY) / 2;
-  return {
+  const alreadySeen = seen.has(node);
+  seen.add(node);
+  const shouldStop = alreadySeen || depth >= 8;
+  const cloned: FigNode = {
     ...node,
     id: `${prefix}/${node.id}`,
     x: node.x * scaleX,
@@ -569,15 +579,38 @@ function cloneNodeForInstance(node: FigNode, prefix: string, scaleX: number, sca
         ? { x: effect.offset.x * scaleX, y: effect.offset.y * scaleY }
         : undefined,
     })),
-    children: node.children?.map((child) => cloneNodeForInstance(child, prefix, scaleX, scaleY)),
+    children: [],
   };
+
+  if (shouldStop) return cloned;
+
+  cloned.children = node.children?.map((child) => ({
+    ...child,
+    id: `${prefix}/${child.id}`,
+    x: child.x * scaleX,
+    y: child.y * scaleY,
+    width: child.width * scaleX,
+    height: child.height * scaleY,
+    children: [],
+  }));
+  return cloned;
 }
 
 function hydrateInstancesInTree(pages: FigPage[]): void {
   const registry = collectComponentRegistry(pages);
   const resolving = new Set<string>();
+  const visited = new WeakSet<FigNode>();
 
-  function hydrateNode(node: FigNode, parent?: FigNode, siblingOrdinal?: number, siblingCount = 1): void {
+  function hydrateNode(
+    node: FigNode,
+    parent?: FigNode,
+    siblingOrdinal?: number,
+    siblingCount = 1,
+    depth = 0,
+  ): void {
+    if (visited.has(node) || depth > 80) return;
+    visited.add(node);
+
     if (node.type === 'INSTANCE' && (node.children?.length ?? 0) === 0) {
       const master = resolveInstanceMaster(node, registry, parent, siblingOrdinal, siblingCount);
       if (master && master !== node && !resolving.has(master.id)) {
@@ -606,6 +639,7 @@ function hydrateInstancesInTree(pages: FigPage[]): void {
         node,
         group ? group.indexOf(child) : undefined,
         group?.length ?? 1,
+        depth + 1,
       );
     }
   }
@@ -1068,18 +1102,20 @@ function gradientPaintToCss(paint: FigPaint): string | undefined {
 
 function extractIRStyle(node: FigNode): Style {
   const style: Style = {};
-  const gradientFill = node.fills?.find((f) => f.visible !== false && f.type.startsWith('GRADIENT_'));
-  if (gradientFill) {
-    const gradient = gradientPaintToCss(gradientFill);
-    if (gradient) style.backgroundImage = gradient;
-  }
-  const solidFill = node.fills?.find((f) => f.visible !== false && (f.type === 'SOLID' || f.color));
-  if (!style.backgroundImage && solidFill?.color) {
-    const base = anyColorToCss({
-      ...solidFill.color,
-      a: (solidFill.color.a ?? 1) * (solidFill.opacity ?? 1),
-    });
-    if (base) style.backgroundColor = base;
+  if (node.type !== 'TEXT') {
+    const gradientFill = node.fills?.find((f) => f.visible !== false && f.type.startsWith('GRADIENT_'));
+    if (gradientFill) {
+      const gradient = gradientPaintToCss(gradientFill);
+      if (gradient) style.backgroundImage = gradient;
+    }
+    const solidFill = node.fills?.find((f) => f.visible !== false && (f.type === 'SOLID' || f.color));
+    if (!style.backgroundImage && solidFill?.color) {
+      const base = anyColorToCss({
+        ...solidFill.color,
+        a: (solidFill.color.a ?? 1) * (solidFill.opacity ?? 1),
+      });
+      if (base) style.backgroundColor = base;
+    }
   }
   const hasFullEllipseChild = node.children?.some(
     (child) => child.type === 'ELLIPSE' &&
@@ -1198,6 +1234,12 @@ function figNodeToIR(node: FigNode, parent?: FigNode): IRNode {
 }
 
 function pageToIRDocument(page: FigPage, docName: string, defaultWidth: number, defaultHeight: number): IRDocument {
+  const visibleChildren = page.children.filter((n) => n.visible !== false);
+  const topLevelFrames = visibleChildren.filter((n) => n.type === 'FRAME');
+  if (visibleChildren.length > 1 && topLevelFrames.length === 1) {
+    return frameToIRDocument(topLevelFrames[0], page.name || docName);
+  }
+
   let rootNode: IRNode;
   if (page.children.length === 1) {
     rootNode = figNodeToIR(page.children[0]);
@@ -1205,6 +1247,10 @@ function pageToIRDocument(page: FigPage, docName: string, defaultWidth: number, 
     // is irrelevant for code generation.
     rootNode.box.x = 0;
     rootNode.box.y = 0;
+    if (rootNode.layout.type === 'absolute') {
+      rootNode.layout.confidence = 0.2;
+      rootNode.layout.source = 'rule-engine';
+    }
   } else if (page.children.length > 1) {
     const maxW = Math.max(...page.children.map((c) => c.x + c.width), defaultWidth);
     const maxH = Math.max(...page.children.map((c) => c.y + c.height), defaultHeight);
@@ -1260,7 +1306,14 @@ export async function parseFig(buf: Buffer): Promise<IRDocument> {
   if (doc.pages.length === 0) {
     throw new Error('No pages found in the .fig file');
   }
-  return pageToIRDocument(doc.pages[0], doc.name, doc.width, doc.height);
+  const designPage = doc.pages.find((page) => (
+    !/internal\s+only|components?/i.test(page.name)
+    && (page.children ?? []).some((child) => child.type === 'FRAME' && child.visible !== false)
+  ));
+  const page = designPage ?? doc.pages.find((p) => (
+    (p.children ?? []).some((child) => child.type === 'FRAME' && child.visible !== false)
+  )) ?? doc.pages[0];
+  return pageToIRDocument(page, doc.name, doc.width, doc.height);
 }
 
 export async function parseFigMultiPage(buf: Buffer): Promise<IRDocument[]> {
@@ -1309,6 +1362,10 @@ function frameToIRDocument(frame: FigNode, pageName: string): IRDocument {
   // is irrelevant for code generation.
   rootNode.box.x = 0;
   rootNode.box.y = 0;
+  if (rootNode.layout.type === 'absolute') {
+    rootNode.layout.confidence = 0.2;
+    rootNode.layout.source = 'rule-engine';
+  }
   const ir: IRDocument = {
     name: frame.name || pageName,
     width,

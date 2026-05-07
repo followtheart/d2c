@@ -156,6 +156,7 @@ export async function runVisualFeedback(
 
     if (!lowIds.size) break;
     if (meanFidelity <= bestMean + 1e-3) break;
+  if (i >= maxIter - 1) break;
     bestMean = meanFidelity;
 
     const marked = markLowFidelityNodes(current.root, lowIds);

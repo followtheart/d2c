@@ -386,7 +386,7 @@ function absolutizeNode(node: RenderNode, parentX = 0, parentY = 0): RenderNode 
   };
 }
 
-function convertNode(node: FigNode, ctx: ConvertCtx, isRoot: boolean): RenderNode {
+function convertNode(node: FigNode, ctx: ConvertCtx, isRoot: boolean, depth = 0): RenderNode {
   const renderType = mapRenderType(node);
 
   // Fills
@@ -408,11 +408,11 @@ function convertNode(node: FigNode, ctx: ConvertCtx, isRoot: boolean): RenderNod
   const { shadows, innerShadows, blur } = convertEffects(node.effects);
 
   // Children
-  const sourceChildren = resolveInstanceChildren(node, ctx);
+  const sourceChildren = depth > 80 ? [] : resolveInstanceChildren(node, ctx);
   const children: RenderNode[] = [];
   for (const c of sourceChildren) {
     if (!ctx.options.includeHidden && c.visible === false) continue;
-    children.push(convertNode(c, ctx, false));
+    children.push(convertNode(c, ctx, false, depth + 1));
   }
 
   const scaledChildren =
