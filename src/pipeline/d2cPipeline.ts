@@ -83,7 +83,10 @@ function log(verbose: boolean | undefined, msg: string): void {
   if (verbose) console.error(msg);
 }
 
-type WorkerPipelineOptions = Omit<PipelineOptions, 'llm'> & { llm?: undefined };
+type WorkerPipelineOptions = Omit<PipelineOptions, 'llm' | 'layoutRefiner'> & {
+  llm?: undefined;
+  layoutRefiner?: undefined;
+};
 
 type MultiPageWorkerResult = PipelineResult | VerifiedPipelineResult;
 
@@ -132,11 +135,11 @@ function resolveMultiPageConcurrency(
 }
 
 function canUseMultiPageWorkers(opts: PipelineOptions): opts is WorkerPipelineOptions {
-  return opts.llm === undefined;
+  return opts.llm === undefined && opts.layoutRefiner === undefined;
 }
 
 function toWorkerPipelineOptions(opts: PipelineOptions): WorkerPipelineOptions {
-  const { llm: _llm, ...rest } = opts;
+  const { llm: _llm, layoutRefiner: _layoutRefiner, ...rest } = opts;
   return {
     ...rest,
     format: 'native',

@@ -165,6 +165,26 @@ DEEPSEEK_API_KEY=sk-... node dist/cli.js \
                                  siliconflow
       --llm-model <id>           Model id for --llm-provider
       --llm-base-url <url>       Override base URL (gateways / Ollama)
+      --refine-layout-with-llm   Re-run low-confidence / absolute layout
+                 containers through an LLM before codegen
+      --layout-llm-provider <name> Provider for layout refinement. Defaults
+                 to --llm-provider / .d2crc.json / --use-claude
+      --layout-llm-model <id>    Model id for layout refinement
+      --layout-llm-base-url <url> Override base URL for layout refinement
+      --layout-refine-threshold <n> Confidence threshold in [0,1]
+                 (default: 0.5)
+      --layout-refine-min-children <n> Minimum child count for candidates
+                 (default: 2)
+      --visual-feedback          Run render → score → mark → refine after
+                 the initial pipeline. Requires
+                 --reference-image, --platform html,
+                 pngjs and Playwright. Implies
+                 --refine-layout-with-llm
+      --visual-feedback-threshold <n> Region fidelity threshold in [0,1]
+                 (default: 0.7)
+      --visual-feedback-iterations <n> Max feedback iterations (default: 2)
+      --visual-feedback-dir <dir> Directory for feedback screenshots and
+                 iterations.json
       --all-pages                Process all pages in the design
       --verify                   Run pipeline with stage-by-stage verification
       --verify-dir <dir>         Write per-stage snapshot JSON files to <dir>
@@ -241,6 +261,16 @@ node dist/cli.js --compare-stages --render-output img/ --compare-report report.m
 # Use Anthropic as the vision backend
 ANTHROPIC_API_KEY=... node dist/cli.js --compare-stages --render-output img/ \
     --vision-provider anthropic --compare-report report.json
+
+# Fidelity engineering: LLM layout refinement before codegen
+OPENROUTER_API_KEY=... node dist/cli.js -i examples/sample-design.json \
+  -p html -o out/html --refine-layout-with-llm \
+  --llm-provider openrouter --layout-refine-threshold 0.55
+
+# Fidelity engineering: visual feedback iteration (render → score → refine)
+OPENROUTER_API_KEY=... node dist/cli.js -i examples/sample-design.json \
+  -p html -o out/html --visual-feedback --reference-image figma.png \
+  --llm-provider openrouter --visual-feedback-dir out/feedback
 
 # ── Figma REST API ─────────────────────────────────────────────────
 # Fetch a Figma cloud file → React code
@@ -765,6 +795,27 @@ console.log(reportToMarkdown(report));
 
 ### 1. 启用 LLM 布局重判
 
+命令行方式：
+
+```bash
+OPENROUTER_API_KEY=... d2c -i design.json -p html -o out/html \
+  --refine-layout-with-llm \
+  --llm-provider openrouter \
+  --layout-refine-threshold 0.5 \
+  --layout-refine-min-children 2
+```
+
+也可以为布局重判单独指定模型，避免影响语义增强模型：
+
+```bash
+OPENROUTER_API_KEY=... d2c -i design.json -p html -o out/html \
+  --refine-layout-with-llm \
+  --layout-llm-provider openrouter \
+  --layout-llm-model openai/gpt-4o-mini
+```
+
+API 方式：
+
 ```ts
 import { runPipeline, type LayoutLLMProvider } from 'd2c';
 
@@ -789,6 +840,25 @@ const result = await runPipeline(designJson, {
 便于自定义 provider 复用同一份提示词格式。
 
 ### 2. 启用视觉反馈回路
+
+命令行方式：
+
+```bash
+OPENROUTER_API_KEY=... d2c -i design.json -p html -o out/html \
+  --visual-feedback \
+  --reference-image figma.png \
+  --llm-provider openrouter \
+  --visual-feedback-threshold 0.7 \
+  --visual-feedback-iterations 2 \
+  --visual-feedback-dir out/feedback
+```
+
+该模式会输出 `out/feedback/iteration_*.png`、`out/feedback/final.png` 和
+`out/feedback/iterations.json`，并用反馈后的 IR 重新生成最终 HTML。当前 CLI
+实现面向单页 `--platform html`；多页 / React / Vue 可继续使用下面的 API
+方式接入自定义 renderer/scorer。
+
+API 方式：
 
 ```ts
 import {

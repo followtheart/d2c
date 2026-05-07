@@ -65,6 +65,6 @@ export const codegenRenderer: SnapshotRenderer = {
       return fallbackEmptyPage('Codegen produced no HTML entry file.');
     }
 
-    return inlineStylesheets(entry.content, files);
+    return `<!-- stage: codegen -->\n${inlineStylesheets(entry.content, files)}`;
   },
 };

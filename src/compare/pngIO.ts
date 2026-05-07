@@ -43,6 +43,14 @@ export function isPngIOAvailable(): boolean {
 export function readPng(filePath: string): RGBAImage {
   const { PNG } = loadPngjs();
   const buf = fs.readFileSync(filePath);
+  return readPngBuffer(buf);
+}
+
+/**
+ * Decode an 8-bit RGBA PNG buffer into a plain RGBAImage.
+ */
+export function readPngBuffer(buf: Buffer): RGBAImage {
+  const { PNG } = loadPngjs();
   // PNG.sync.read returns PNG instance with .data as Buffer in RGBA order.
   const png = PNG.sync.read(buf);
   const data = new Uint8Array(

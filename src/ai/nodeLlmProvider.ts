@@ -267,6 +267,41 @@ export class NodeLlmProvider implements LLMProvider {
     }
   }
 
+  /**
+   * Low-level completion helper for other structured-json tasks that want
+   * the same provider/configuration plumbing as semantic enhancement.
+   */
+  async complete(systemPrompt: string, prompt: string): Promise<string> {
+    const model = this.config.model ?? DEFAULT_MODELS[this.config.provider];
+    const userPrompt = truncatePrompt(prompt);
+
+    try {
+      if (DIRECT_OPENAI_COMPATIBLE_PROVIDERS.has(this.config.provider)) {
+        return await this.callDirectOpenAiCompatible(model, userPrompt, systemPrompt);
+      }
+
+      const llm = await this.getLLM();
+      const chat = llm
+        .chat(model)
+        .withSystemPrompt(systemPrompt)
+        .withTemperature(this.config.temperature ?? 0);
+      const res = await chat.ask(userPrompt, {
+        maxTokens: this.config.maxTokens ?? DEFAULT_MAX_TOKENS[this.config.provider],
+        requestTimeout:
+          this.config.requestTimeout ??
+          DEFAULT_REQUEST_TIMEOUT_MS[this.config.provider],
+      });
+      return res?.content ?? res?.toString() ?? '';
+    } catch (e) {
+      const msg = (e as Error).message ?? String(e);
+      const cause = (e as { cause?: Error }).cause;
+      const detail = cause ? `${msg} (cause: ${cause.message ?? cause})` : msg;
+      throw new Error(
+        `NodeLlmProvider (${this.config.provider}/${model}) request failed: ${detail}`,
+      );
+    }
+  }
+
   /** Lazily import `@node-llm/core` and build a singleton LLM instance. */
   private async getLLM(): Promise<{
     chat: (model?: string) => {
@@ -301,40 +336,10 @@ export class NodeLlmProvider implements LLMProvider {
   }
 
   async annotate(tree: IRNode): Promise<Record<string, Semantics>> {
-    const model = this.config.model ?? DEFAULT_MODELS[this.config.provider];
-
     const rawPrompt =
       'Analyze this IR tree and return semantic annotations as JSON.\n\n' +
       JSON.stringify(stripHeavy(tree), null, 2);
-    const userPrompt = truncatePrompt(rawPrompt);
-
-    let responseText: string;
-    try {
-      if (DIRECT_OPENAI_COMPATIBLE_PROVIDERS.has(this.config.provider)) {
-        responseText = await this.callDirectOpenAiCompatible(model, userPrompt);
-      } else {
-        const llm = await this.getLLM();
-        const chat = llm
-          .chat(model)
-          .withSystemPrompt(SYSTEM_PROMPT)
-          .withTemperature(this.config.temperature ?? 0);
-        const res = await chat.ask(userPrompt, {
-          maxTokens: this.config.maxTokens ?? DEFAULT_MAX_TOKENS[this.config.provider],
-          requestTimeout:
-            this.config.requestTimeout ??
-            DEFAULT_REQUEST_TIMEOUT_MS[this.config.provider],
-        });
-        // ChatResponseString extends String — `.toString()` always works.
-        responseText = res?.content ?? res?.toString() ?? '';
-      }
-    } catch (e) {
-      const msg = (e as Error).message ?? String(e);
-      const cause = (e as { cause?: Error }).cause;
-      const detail = cause ? `${msg} (cause: ${cause.message ?? cause})` : msg;
-      throw new Error(
-        `NodeLlmProvider (${this.config.provider}/${model}) request failed: ${detail}`,
-      );
-    }
+    const responseText = await this.complete(SYSTEM_PROMPT, rawPrompt);
 
     try {
       return JSON.parse(extractJson(responseText));
@@ -346,6 +351,7 @@ export class NodeLlmProvider implements LLMProvider {
   private async callDirectOpenAiCompatible(
     model: string,
     userPrompt: string,
+    systemPrompt = SYSTEM_PROMPT,
   ): Promise<string> {
     const runtimeConfig = resolveNodeLlmRuntimeConfig(this.config);
     const baseUrl = String(runtimeConfig.clientConfig.openaiApiBase ?? '');
@@ -377,7 +383,7 @@ export class NodeLlmProvider implements LLMProvider {
             max_tokens:
               this.config.maxTokens ?? DEFAULT_MAX_TOKENS[this.config.provider],
             messages: [
-              { role: 'system', content: SYSTEM_PROMPT },
+              { role: 'system', content: systemPrompt },
               { role: 'user', content: userPrompt },
             ],
             ...buildExtraParams(this.config.provider, model),

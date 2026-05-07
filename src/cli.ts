@@ -10,7 +10,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import { runPipeline, runMultiPagePipeline, runPipelineWithVerification, runMultiPagePipelineWithVerification } from './pipeline/d2cPipeline';
+import { runPipeline, runMultiPagePipeline, runPipelineWithVerification, runMultiPagePipelineWithVerification, type PipelineResult } from './pipeline/d2cPipeline';
 import { formatVerificationReport, snapshotToJSON } from './pipeline/verify';
 import type { Platform } from './codegen/factory';
 import type { DesignFormat } from './parser';
@@ -20,6 +20,14 @@ import {
   type NodeLlmProviderName,
 } from './ai/nodeLlmProvider';
 import type { LLMProvider } from './ai/semanticEnhancer';
+import type { IRDocument } from './ir/types';
+import {
+  buildRefinePayload,
+  DEFAULT_REFINE_PROMPT,
+  type LayoutLLMProvider,
+  type LayoutSuggestion,
+  type RefineOptions,
+} from './layout/llmRefiner';
 import { loadConfig, resolveApiKey, resolveFigmaToken, type D2CConfig } from './config';
 
 interface Args {
@@ -97,6 +105,75 @@ interface Args {
   fidelityDiagnosticsDir?: string;
   /** Also invoke the vision LLM for the perceptual-LLM dimension. */
   fidelityUseLlm?: boolean;
+  /** Refine low-confidence / absolute layouts with an LLM before codegen. */
+  refineLayoutWithLlm?: boolean;
+  /** Dedicated provider for layout refinement; defaults to --llm-provider / config. */
+  layoutLlmProvider?: NodeLlmProviderName;
+  /** Dedicated model for layout refinement; defaults to --llm-model / config. */
+  layoutLlmModel?: string;
+  /** Dedicated base URL for layout refinement; defaults to --llm-base-url / config. */
+  layoutLlmBaseUrl?: string;
+  /** Confidence threshold below which containers are sent to layout LLM. */
+  layoutRefineThreshold?: number;
+  /** Minimum child count for layout LLM candidates. */
+  layoutRefineMinChildren?: number;
+  /** Run render → score → mark → refine visual feedback loop. */
+  visualFeedback?: boolean;
+  /** Region score threshold for visual feedback low-fidelity nodes. */
+  visualFeedbackThreshold?: number;
+  /** Maximum visual feedback iterations. */
+  visualFeedbackIterations?: number;
+  /** Directory for visual-feedback screenshots and iteration report. */
+  visualFeedbackDir?: string;
+}
+
+class CliLayoutRefiner implements LayoutLLMProvider {
+  constructor(private readonly llm: NodeLlmProvider) {}
+
+  async refine(
+    candidates: Array<{
+      node: Parameters<LayoutLLMProvider['refine']>[0][number]['node'];
+      reason: Parameters<LayoutLLMProvider['refine']>[0][number]['reason'];
+    }>,
+  ): Promise<LayoutSuggestion[]> {
+    const payload = candidates.map((c) => ({
+      reason: c.reason,
+      ...buildRefinePayload(c.node),
+    }));
+    const response = await this.llm.complete(
+      DEFAULT_REFINE_PROMPT,
+      'Refine these layout candidates and return only the JSON array of suggestions.\n\n' +
+        JSON.stringify(payload, null, 2),
+    );
+    return parseLayoutSuggestions(response);
+  }
+}
+
+function parseLayoutSuggestions(response: string): LayoutSuggestion[] {
+  const start = response.indexOf('[');
+  const end = response.lastIndexOf(']');
+  if (start < 0 || end < start) return [];
+  let raw: unknown;
+  try {
+    raw = JSON.parse(response.slice(start, end + 1));
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(raw)) return [];
+  const out: LayoutSuggestion[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const rec = item as { nodeId?: unknown; layout?: unknown };
+    if (typeof rec.nodeId !== 'string' || !rec.layout || typeof rec.layout !== 'object') {
+      continue;
+    }
+    const layout = rec.layout as LayoutSuggestion['layout'];
+    if (layout.type !== 'flex' && layout.type !== 'grid' && layout.type !== 'absolute') {
+      continue;
+    }
+    out.push({ nodeId: rec.nodeId, layout });
+  }
+  return out;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -242,6 +319,61 @@ function parseArgs(argv: string[]): Args {
       case '--fidelity-use-llm':
         args.fidelityUseLlm = true;
         break;
+      case '--refine-layout-with-llm':
+        args.refineLayoutWithLlm = true;
+        break;
+      case '--layout-llm-provider':
+        args.layoutLlmProvider = next() as NodeLlmProviderName;
+        break;
+      case '--layout-llm-model':
+        args.layoutLlmModel = next();
+        break;
+      case '--layout-llm-base-url':
+        args.layoutLlmBaseUrl = next();
+        break;
+      case '--layout-refine-threshold': {
+        const rawValue = next();
+        const value = parseFloat(rawValue);
+        if (!Number.isFinite(value) || value < 0 || value > 1) {
+          throw new Error(`--layout-refine-threshold expects a number in [0,1], got ${rawValue}`);
+        }
+        args.layoutRefineThreshold = value;
+        break;
+      }
+      case '--layout-refine-min-children': {
+        const rawValue = next();
+        const value = parseInt(rawValue, 10);
+        if (!Number.isFinite(value) || value < 1) {
+          throw new Error(`--layout-refine-min-children expects a positive integer, got ${rawValue}`);
+        }
+        args.layoutRefineMinChildren = value;
+        break;
+      }
+      case '--visual-feedback':
+        args.visualFeedback = true;
+        args.refineLayoutWithLlm = true;
+        break;
+      case '--visual-feedback-threshold': {
+        const rawValue = next();
+        const value = parseFloat(rawValue);
+        if (!Number.isFinite(value) || value < 0 || value > 1) {
+          throw new Error(`--visual-feedback-threshold expects a number in [0,1], got ${rawValue}`);
+        }
+        args.visualFeedbackThreshold = value;
+        break;
+      }
+      case '--visual-feedback-iterations': {
+        const rawValue = next();
+        const value = parseInt(rawValue, 10);
+        if (!Number.isFinite(value) || value < 1) {
+          throw new Error(`--visual-feedback-iterations expects a positive integer, got ${rawValue}`);
+        }
+        args.visualFeedbackIterations = value;
+        break;
+      }
+      case '--visual-feedback-dir':
+        args.visualFeedbackDir = next();
+        break;
       case '--figma-token':
         args.figmaToken = next();
         break;
@@ -368,6 +500,28 @@ Options:
                                  (heatmap, aligned PNGs).
       --fidelity-use-llm           Also run the 6-dim LLM perceptual
                                  judgment (needs --vision-provider).
+      --refine-layout-with-llm     Re-run low-confidence / absolute layout
+                 containers through an LLM before codegen.
+                 Uses --layout-llm-provider, or falls back
+                 to --llm-provider / .d2crc.json / --use-claude.
+      --layout-llm-provider <name> Provider for layout refinement. Supports
+                 the same names as --llm-provider.
+      --layout-llm-model <id>      Model id for layout refinement.
+      --layout-llm-base-url <url>  Base URL override for layout refinement.
+      --layout-refine-threshold <n>  Confidence threshold in [0,1]
+                 (default: 0.5).
+      --layout-refine-min-children <n>  Minimum child count for candidates
+                 (default: 2).
+      --visual-feedback            Run render → score → mark → refine after
+                 the initial pipeline. Requires
+                 --reference-image, --platform html,
+                 pngjs and Playwright. Implies
+                 --refine-layout-with-llm.
+      --visual-feedback-threshold <n>  Region fidelity threshold in [0,1]
+                 (default: 0.7).
+      --visual-feedback-iterations <n> Max feedback iterations (default: 2).
+      --visual-feedback-dir <dir>  Directory for feedback screenshots and
+                 iterations.json.
       --figma-token <token>         Figma personal access token (or set
                                  FIGMA_TOKEN env var, or figmaToken in
                                  .d2crc.json).
@@ -423,6 +577,11 @@ Examples:
   d2c --compare-fidelity --reference-image figma.png --candidate-image codegen.png \\
       --fidelity-ir ir.json --fidelity-report report.md \\
       --fidelity-diagnostics-dir out/fidelity
+    OPENROUTER_API_KEY=... d2c -i design.json -p html -o out/html \
+      --refine-layout-with-llm --llm-provider openrouter
+    OPENROUTER_API_KEY=... d2c -i design.json -p html -o out/html \
+      --visual-feedback --reference-image figma.png --llm-provider openrouter \
+      --visual-feedback-dir out/feedback
   FIGMA_TOKEN=... d2c --figma-file-key abc123 -p react -o out/react
   FIGMA_TOKEN=... d2c --figma-file-key abc123 --render -o out/preview
   FIGMA_TOKEN=... d2c --figma-file-key abc123 --figma-export-images -o out/images
@@ -661,6 +820,166 @@ async function compareFidelityCommand(args: Args): Promise<void> {
   console.error('');
 }
 
+function buildLayoutRefineOptions(args: Args): RefineOptions | undefined {
+  if (args.layoutRefineThreshold === undefined && args.layoutRefineMinChildren === undefined) {
+    return undefined;
+  }
+  return {
+    threshold: args.layoutRefineThreshold,
+    minChildren: args.layoutRefineMinChildren,
+  };
+}
+
+function createLayoutRefiner(
+  args: Args,
+  config: D2CConfig,
+  effectiveProvider: NodeLlmProviderName | undefined,
+  effectiveModel: string | undefined,
+  effectiveBaseUrl: string | undefined,
+): LayoutLLMProvider | undefined {
+  if (!args.refineLayoutWithLlm && !args.visualFeedback) return undefined;
+
+  const provider =
+    args.layoutLlmProvider ??
+    effectiveProvider ??
+    (args.useClaude ? 'anthropic' : undefined) ??
+    config.llm?.provider;
+  if (!provider) {
+    console.error(
+      'ERROR: --refine-layout-with-llm requires --layout-llm-provider, --llm-provider, --use-claude, or llm.provider in .d2crc.json.',
+    );
+    process.exit(2);
+  }
+
+  const apiKey = provider === 'ollama' ? undefined : pickApiKey(provider, config);
+  if (!apiKey && provider !== 'ollama') {
+    console.error(
+      `ERROR: layout refinement with provider ${provider} requires ${apiKeyEnvVarFor(provider)} env var or apiKeys.${provider} in .d2crc.json.`,
+    );
+    process.exit(2);
+  }
+
+  const llm = new NodeLlmProvider({
+    provider,
+    model: args.layoutLlmModel ?? effectiveModel,
+    apiKey,
+    baseUrl: args.layoutLlmBaseUrl ?? effectiveBaseUrl,
+  });
+  return new CliLayoutRefiner(llm);
+}
+
+async function runVisualFeedbackOnResult(
+  args: Args,
+  result: PipelineResult,
+  layoutRefiner: LayoutLLMProvider,
+): Promise<PipelineResult> {
+  if (!args.referenceImage) {
+    console.error('ERROR: --visual-feedback requires --reference-image <file>.');
+    process.exit(2);
+  }
+  if (args.platform !== 'html') {
+    console.error('ERROR: --visual-feedback currently requires --platform html.');
+    process.exit(2);
+  }
+  if (!fs.existsSync(args.referenceImage)) {
+    console.error(`ERROR: reference image not found: ${args.referenceImage}`);
+    process.exit(2);
+  }
+
+  const outBase = args.out && args.out !== '-' ? args.out : 'out';
+  const feedbackDir = args.visualFeedbackDir ?? path.join(outBase, 'visual-feedback');
+  fs.mkdirSync(feedbackDir, { recursive: true });
+
+  const { runVisualFeedback } = await import('./pipeline/visualFeedback');
+  const { captureScreenshot } = await import('./renderer/screenshotService');
+  const { codegenRenderer } = await import('./renderer/codegenRenderer');
+  const { createGenerator } = await import('./codegen/factory');
+  const { readPngBuffer } = await import('./compare/pngIO');
+  const { alignImages } = await import('./compare/align');
+  const { evaluateRegions } = await import('./compare/region');
+  const { extractTokens, toStyleDictionary } = await import('./tokens/extract');
+  const { generateTailwindPreset } = await import('./tokens/tailwindPreset');
+
+  let renderCount = 0;
+  const renderer = {
+    async render(doc: IRDocument): Promise<Buffer> {
+      const generated = createGenerator('html').generate(doc);
+      const html = codegenRenderer.render({
+        stage: 'codegen',
+        durationMs: 0,
+        ir: doc,
+        generated,
+        checks: [],
+      });
+      const pngPath = path.join(feedbackDir, `iteration_${renderCount}.png`);
+      renderCount += 1;
+      await captureScreenshot(html, pngPath, {
+        width: Math.max(320, Math.ceil(doc.width)),
+        height: Math.max(240, Math.ceil(doc.height)),
+        deviceScaleFactor: 1,
+      });
+      return fs.readFileSync(pngPath);
+    },
+  };
+
+  const scorer = {
+    async score(reference: Buffer, candidate: Buffer, doc: IRDocument) {
+      const refImg = readPngBuffer(reference);
+      const candImg = readPngBuffer(candidate);
+      const aligned = alignImages(refImg, candImg);
+      return evaluateRegions(doc, aligned.reference, aligned.candidate).regions;
+    },
+  };
+
+  console.error(`d2c visual-feedback: running feedback loop → ${feedbackDir}`);
+  const feedback = await runVisualFeedback(
+    result.ir,
+    fs.readFileSync(args.referenceImage),
+    renderer,
+    scorer,
+    layoutRefiner,
+    {
+      fidelityThreshold: args.visualFeedbackThreshold,
+      maxIterations: args.visualFeedbackIterations,
+      refine: buildLayoutRefineOptions(args),
+      log: (msg) => console.error(msg),
+    },
+  );
+
+  const finalPng = await renderer.render(feedback.ir);
+  fs.writeFileSync(path.join(feedbackDir, 'final.png'), finalPng);
+  fs.writeFileSync(
+    path.join(feedbackDir, 'iterations.json'),
+    JSON.stringify(
+      feedback.iterations.map((it) => ({
+        iteration: it.iteration,
+        meanFidelity: it.meanFidelity,
+        belowThreshold: it.belowThreshold,
+      })),
+      null,
+      2,
+    ),
+  );
+
+  const tokens = extractTokens(feedback.ir);
+  const finalIr: IRDocument = {
+    ...feedback.ir,
+    tokenSet: tokens,
+  };
+  const generated = createGenerator(args.platform).generate(finalIr);
+  console.error(
+    `d2c visual-feedback: wrote ${feedback.iterations.length} iteration(s) + final.png`,
+  );
+  return {
+    ...result,
+    ir: finalIr,
+    generated,
+    tokens,
+    styleDictionary: toStyleDictionary(tokens),
+    tailwindPreset: generateTailwindPreset(tokens),
+  };
+}
+
 /**
  * Render per-stage snapshot JSON files to HTML or PNG.
  *
@@ -833,6 +1152,18 @@ async function figmaApiCommand(args: Args): Promise<void> {
   const effectiveProvider = args.llmProvider ?? config.llm?.provider;
   const effectiveModel = args.llmModel ?? config.llm?.model;
   const effectiveBaseUrl = args.llmBaseUrl ?? config.llm?.baseUrl;
+  const layoutRefiner = createLayoutRefiner(
+    args,
+    config,
+    effectiveProvider,
+    effectiveModel,
+    effectiveBaseUrl,
+  );
+
+  if (args.visualFeedback && args.allPages) {
+    console.error('ERROR: --visual-feedback currently supports single-page inputs only.');
+    process.exit(2);
+  }
 
   let llm: LLMProvider | undefined;
   if (!args.noLlm && args.useClaude) {
@@ -887,6 +1218,8 @@ async function figmaApiCommand(args: Args): Promise<void> {
     responsiveVariants,
     previousIR,
     computeDiff: !!args.emitDiff,
+    layoutRefiner,
+    layoutRefineOptions: buildLayoutRefineOptions(args),
   };
 
   if (args.allPages) {
@@ -910,9 +1243,17 @@ async function figmaApiCommand(args: Args): Promise<void> {
       log(`generated ${generated.files.length} file(s) for ${multiResult.pages.length} page(s) → ${out}`);
     }
   } else {
-    const result = args.verify
+    let result = args.verify
       ? await runPipelineWithVerification(pipelineInput, pipelineOpts)
       : await runPipeline(pipelineInput, pipelineOpts);
+
+    if (args.visualFeedback) {
+      if (!layoutRefiner) {
+        console.error('ERROR: --visual-feedback requires a layout LLM refiner.');
+        process.exit(2);
+      }
+      result = await runVisualFeedbackOnResult(args, result, layoutRefiner);
+    }
     const { ir, generated, styleDictionary, tailwindPreset, diff } = result;
 
     if (args.emitIR) {
@@ -1171,6 +1512,13 @@ async function main(): Promise<void> {
   const effectiveProvider = args.llmProvider ?? config.llm?.provider;
   const effectiveModel = args.llmModel ?? config.llm?.model;
   const effectiveBaseUrl = args.llmBaseUrl ?? config.llm?.baseUrl;
+  const layoutRefiner = createLayoutRefiner(
+    args,
+    config,
+    effectiveProvider,
+    effectiveModel,
+    effectiveBaseUrl,
+  );
 
   let llm: LLMProvider | undefined;
   if (args.noLlm) {
@@ -1274,6 +1622,11 @@ async function main(): Promise<void> {
     }
   }
 
+  if (args.visualFeedback && args.allPages) {
+    console.error('ERROR: --visual-feedback currently supports single-page inputs only.');
+    process.exit(2);
+  }
+
   // Pre-parse responsive variants (each one runs through Parse + Layout
   // inference so the diff sees the same shape as the base IR).
   const { parseDesign } = await import('./parser');
@@ -1302,6 +1655,8 @@ async function main(): Promise<void> {
     responsiveVariants,
     previousIR,
     computeDiff: !!args.emitDiff,
+    layoutRefiner,
+    layoutRefineOptions: buildLayoutRefineOptions(args),
   };
 
   // 多页面模式
@@ -1424,9 +1779,17 @@ async function main(): Promise<void> {
   }
 
   // Choose verified or standard pipeline
-  const result = args.verify
+  let result = args.verify
     ? await runPipelineWithVerification(pipelineInput, pipelineOpts)
     : await runPipeline(pipelineInput, pipelineOpts);
+
+  if (args.visualFeedback) {
+    if (!layoutRefiner) {
+      console.error('ERROR: --visual-feedback requires a layout LLM refiner.');
+      process.exit(2);
+    }
+    result = await runVisualFeedbackOnResult(args, result, layoutRefiner);
+  }
   const { ir, generated, tokens, styleDictionary, tailwindPreset, diff } = result;
   void tokens; // tokens are exposed via styleDictionary
 
