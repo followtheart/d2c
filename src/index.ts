@@ -6,6 +6,16 @@ export { parseMakeBinary, parseMake, parseMakeMultiPage } from './parser/makePar
 export { inferLayout } from './layout/inference';
 export { inferResponsive } from './layout/responsive';
 export type { ResponsiveVariantInput } from './layout/responsive';
+export {
+  refineLayoutWithLLM,
+  buildRefinePayload,
+  DEFAULT_REFINE_PROMPT,
+} from './layout/llmRefiner';
+export type {
+  LayoutLLMProvider,
+  LayoutSuggestion,
+  RefineOptions,
+} from './layout/llmRefiner';
 export { enhance, NoopLLMProvider } from './ai/semanticEnhancer';
 export type { LLMProvider } from './ai/semanticEnhancer';
 export { ClaudeProvider } from './ai/claudeProvider';
@@ -36,6 +46,11 @@ export type { GenerateResult, GeneratedFile } from './codegen/base';
 export { extractTokens, toStyleDictionary } from './tokens/extract';
 export type { TokenSet, StyleDictionaryFile } from './tokens/extract';
 export {
+  buildTokenLookup,
+  NULL_TOKEN_LOOKUP,
+} from './tokens/resolver';
+export type { TokenLookup } from './tokens/resolver';
+export {
   generateTailwindPreset,
   buildTailwindLookup,
 } from './tokens/tailwindPreset';
@@ -65,6 +80,17 @@ export type {
   VerificationResult,
 } from './pipeline/verify';
 export { compareStages } from './pipeline/stageCompare';
+export {
+  runVisualFeedback,
+  markLowFidelityNodes,
+  selectLowFidelityNodeIds,
+} from './pipeline/visualFeedback';
+export type {
+  VisualFeedbackOptions,
+  VisualFeedbackRenderer,
+  VisualFeedbackScorer,
+  FeedbackIteration,
+} from './pipeline/visualFeedback';
 export type {
   PairAnalysis,
   OverallAnalysis,

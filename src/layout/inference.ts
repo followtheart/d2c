@@ -229,18 +229,32 @@ function tryInferGrid(children: IRNode[]): { columns: number; gap: number } | nu
 
 function inferContainerLayout(node: IRNode): Layout {
   const children = node.children;
-  // Keep explicit layouts (e.g. parsed from Figma Auto Layout)
+  // Keep explicit layouts (e.g. parsed from Figma Auto Layout) — they already
+  // carry source-of-truth confidence/source from the parser.
   if (node.layout.type === 'flex' || node.layout.type === 'grid')
     return node.layout;
 
-  if (children.length === 0) return { type: 'flex', direction: 'column' };
+  if (children.length === 0)
+    return { type: 'flex', direction: 'column', confidence: 1, source: 'rule-engine' };
   if (children.length === 1)
-    return { type: 'flex', direction: 'column', gap: 0 };
+    return {
+      type: 'flex',
+      direction: 'column',
+      gap: 0,
+      confidence: 1,
+      source: 'rule-engine',
+    };
 
   // Grid detection first (a 2D repeating pattern beats flex)
   const grid = tryInferGrid(children);
   if (grid) {
-    return { type: 'grid', columns: grid.columns, gap: grid.gap };
+    return {
+      type: 'grid',
+      columns: grid.columns,
+      gap: grid.gap,
+      confidence: 0.9,
+      source: 'rule-engine',
+    };
   }
 
   // Check stacking
@@ -260,6 +274,8 @@ function inferContainerLayout(node: IRNode): Layout {
       gap,
       justifyContent: justify,
       alignItems: inferCrossAlign(sorted, node, 'column'),
+      confidence: 0.95,
+      source: 'rule-engine',
     };
   }
   if (noXOverlap && !noYOverlap) {
@@ -271,6 +287,8 @@ function inferContainerLayout(node: IRNode): Layout {
       gap,
       justifyContent: justify,
       alignItems: inferCrossAlign(sorted, node, 'row'),
+      confidence: 0.95,
+      source: 'rule-engine',
     };
   }
   if (noXOverlap && noYOverlap) {
@@ -289,6 +307,8 @@ function inferContainerLayout(node: IRNode): Layout {
         gap,
         justifyContent: justify,
         alignItems: inferCrossAlign(sortedY, node, 'column'),
+        confidence: 0.7,
+        source: 'rule-engine',
       };
     } else {
       const { justify, gap } = inferJustify(sortedX, node, 'row');
@@ -298,6 +318,8 @@ function inferContainerLayout(node: IRNode): Layout {
         gap,
         justifyContent: justify,
         alignItems: inferCrossAlign(sortedX, node, 'row'),
+        confidence: 0.7,
+        source: 'rule-engine',
       };
     }
   }
@@ -336,6 +358,11 @@ function inferContainerLayout(node: IRNode): Layout {
         gap,
         justifyContent: justify,
         alignItems: inferCrossAlign(sorted, node, 'column'),
+        // Majority-based flex is a softer match than the clean stacking
+        // detection above. Score it proportional to the non-overlap ratio
+        // so a low-confidence node can later be refined by an LLM.
+        confidence: Math.min(0.7, 0.4 + yNonOverlapRatio * 0.4),
+        source: 'rule-engine',
       };
     }
     if (xNonOverlapRatio >= 0.6 && rowAlignmentRatio >= 0.7) {
@@ -347,12 +374,15 @@ function inferContainerLayout(node: IRNode): Layout {
         gap,
         justifyContent: justify,
         alignItems: inferCrossAlign(sorted, node, 'row'),
+        confidence: Math.min(0.7, 0.4 + xNonOverlapRatio * 0.4),
+        source: 'rule-engine',
       };
     }
   }
 
-  // Fallback to absolute positioning (truly overlapping)
-  return { type: 'absolute' };
+  // Fallback to absolute positioning (truly overlapping). Mark with low
+  // confidence so the LLM/vision refiner downstream can pick this node up.
+  return { type: 'absolute', confidence: 0.2, source: 'rule-engine' };
 }
 
 /**
