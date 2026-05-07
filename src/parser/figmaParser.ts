@@ -16,6 +16,7 @@ import type {
   IRNode,
   IRNodeType,
   Layout,
+  SourceMeta,
   Style,
   TextStyle,
 } from '../ir/types';
@@ -46,12 +47,46 @@ interface FigmaNode {
   };
   layoutMode?: 'NONE' | 'HORIZONTAL' | 'VERTICAL';
   primaryAxisAlignItems?: 'MIN' | 'CENTER' | 'MAX' | 'SPACE_BETWEEN';
-  counterAxisAlignItems?: 'MIN' | 'CENTER' | 'MAX';
+  counterAxisAlignItems?: 'MIN' | 'CENTER' | 'MAX' | 'BASELINE';
   itemSpacing?: number;
+  counterAxisSpacing?: number;
+  layoutWrap?: 'NO_WRAP' | 'WRAP';
+  primaryAxisSizingMode?: 'FIXED' | 'AUTO';
+  counterAxisSizingMode?: 'FIXED' | 'AUTO';
+  layoutSizingHorizontal?: 'FIXED' | 'HUG' | 'FILL';
+  layoutSizingVertical?: 'FIXED' | 'HUG' | 'FILL';
   paddingLeft?: number;
   paddingRight?: number;
   paddingTop?: number;
   paddingBottom?: number;
+  /** Figma constraints describing how a child reacts when its parent resizes. */
+  constraints?: {
+    horizontal?: 'LEFT' | 'RIGHT' | 'CENTER' | 'LEFT_RIGHT' | 'SCALE';
+    vertical?: 'TOP' | 'BOTTOM' | 'CENTER' | 'TOP_BOTTOM' | 'SCALE';
+  };
+  /** Per-side stroke widths (when Figma sets individualStrokeWeights). */
+  individualStrokeWeights?: {
+    top: number;
+    right: number;
+    bottom: number;
+    left: number;
+  };
+  /** Auto-truncate / auto-resize behaviour for TEXT nodes. */
+  textAutoResize?: 'NONE' | 'WIDTH_AND_HEIGHT' | 'HEIGHT' | 'TRUNCATE';
+  /** Set on INSTANCE nodes — references the master COMPONENT. */
+  componentId?: string;
+  /** Set on COMPONENT nodes that belong to a COMPONENT_SET. */
+  componentSetId?: string;
+  /**
+   * Override list emitted on INSTANCE nodes — Figma reports the path of
+   * properties the instance has changed from its master (e.g. text content,
+   * fill color overrides). We forward the raw paths so codegen can decide
+   * which props to surface.
+   */
+  overrides?: Array<{ id: string; overriddenFields?: string[] }>;
+  /** Variant property values on COMPONENT nodes inside a COMPONENT_SET. */
+  componentPropertyDefinitions?: Record<string, { type: string; defaultValue?: unknown }>;
+  componentProperties?: Record<string, { type: string; value: unknown }>;
   children?: FigmaNode[];
 }
 
@@ -174,6 +209,10 @@ function extractLayout(figma: FigmaNode): Layout {
     layout.type = 'flex';
     layout.direction = figma.layoutMode === 'HORIZONTAL' ? 'row' : 'column';
     layout.gap = figma.itemSpacing;
+    layout.wrap = figma.layoutWrap === 'WRAP';
+    // Auto-layout from the source tool: full confidence.
+    layout.confidence = 1;
+    layout.source = 'figma-autolayout';
     switch (figma.primaryAxisAlignItems) {
       case 'MIN':
         layout.justifyContent = 'start';
@@ -201,6 +240,67 @@ function extractLayout(figma: FigmaNode): Layout {
     }
   }
   return layout;
+}
+
+function extractMeta(figma: FigmaNode): SourceMeta | undefined {
+  const meta: NonNullable<SourceMeta['figma']> = {};
+
+  if (figma.constraints) {
+    meta.constraints = {
+      horizontal: figma.constraints.horizontal,
+      vertical: figma.constraints.vertical,
+    };
+  }
+  if (figma.layoutMode === 'HORIZONTAL' || figma.layoutMode === 'VERTICAL') {
+    meta.autoLayout = {
+      direction: figma.layoutMode,
+      primaryAlign: figma.primaryAxisAlignItems,
+      counterAlign: figma.counterAxisAlignItems,
+      itemSpacing: figma.itemSpacing,
+      counterAxisSpacing: figma.counterAxisSpacing,
+      layoutWrap: figma.layoutWrap,
+      primarySizing: figma.primaryAxisSizingMode,
+      counterSizing: figma.counterAxisSizingMode,
+    };
+  }
+  if (figma.layoutSizingHorizontal || figma.layoutSizingVertical) {
+    meta.sizing = {
+      horizontal: figma.layoutSizingHorizontal,
+      vertical: figma.layoutSizingVertical,
+    };
+  }
+  if (figma.individualStrokeWeights) {
+    meta.strokeWeights = figma.individualStrokeWeights;
+  }
+  if (figma.textAutoResize) {
+    meta.textAutoResize = figma.textAutoResize;
+  }
+  if (figma.type === 'INSTANCE' && figma.componentId) {
+    meta.instance = {
+      componentId: figma.componentId,
+      componentSetId: figma.componentSetId,
+      componentName: figma.name,
+      overrides: (figma.overrides ?? []).flatMap((o) => o.overriddenFields ?? []),
+    };
+  }
+  if (figma.type === 'COMPONENT' || figma.type === 'COMPONENT_SET') {
+    const variantProps: Record<string, string> = {};
+    if (figma.componentProperties) {
+      for (const [k, v] of Object.entries(figma.componentProperties)) {
+        if (v && (v.type === 'VARIANT' || typeof v.value === 'string')) {
+          variantProps[k] = String(v.value);
+        }
+      }
+    }
+    meta.component = {
+      key: figma.id,
+      name: figma.name,
+      setKey: figma.componentSetId,
+      variantProps: Object.keys(variantProps).length ? variantProps : undefined,
+    };
+  }
+
+  return Object.keys(meta).length ? { figma: meta } : undefined;
 }
 
 function extractBox(figma: FigmaNode, parent?: FigmaNode): Box {
@@ -237,6 +337,7 @@ function toIRNode(figma: FigmaNode, parent?: FigmaNode): IRNode {
   if (type === 'text' && style.backgroundColor) {
     delete style.backgroundColor;
   }
+  const meta = extractMeta(figma);
   const node: IRNode = {
     id: figma.id,
     name: figma.name,
@@ -250,6 +351,7 @@ function toIRNode(figma: FigmaNode, parent?: FigmaNode): IRNode {
       .filter((c) => c.visible !== false)
       .map((c) => toIRNode(c, figma)),
   };
+  if (meta) node.meta = meta;
   return node;
 }
 

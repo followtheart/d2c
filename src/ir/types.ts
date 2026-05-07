@@ -45,6 +45,24 @@ export interface Layout {
   gap?: number;
   /** number of columns if grid */
   columns?: number;
+  /** Wrap onto multiple lines (Figma autolayout `layoutWrap = WRAP`). */
+  wrap?: boolean;
+  /**
+   * Confidence (0-1) that the layout was inferred correctly.
+   *  - 1.0 — comes from the source tool's explicit auto-layout
+   *  - 0.7-0.95 — rule-engine matched a clear pattern (clean stack/grid)
+   *  - 0.4-0.7 — heuristic match with caveats (mixed overlap, ambiguous gaps)
+   *  - <0.4 — fell back to absolute / pattern unclear
+   * Downstream stages (LLM refiner, vision feedback loop) can consume this
+   * field to decide whether to second-guess the rule engine.
+   */
+  confidence?: number;
+  /**
+   * Free-form note explaining how the layout was decided (e.g. "auto-layout
+   * row from Figma", "majority-axis fallback"). Useful for debugging and as
+   * input to the LLM layout refiner.
+   */
+  source?: 'figma-autolayout' | 'sketch' | 'rule-engine' | 'llm-refined' | 'vision-refined';
 }
 
 export interface Shadow {
@@ -143,6 +161,61 @@ export interface ResponsiveVariants {
   }>;
 }
 
+/**
+ * Source-tool-specific metadata that we want to keep available for
+ * downstream stages (layout inference, codegen) without polluting the
+ * generic IR shape. The IR layer only *transports* these fields — they
+ * are read on a best-effort basis by stages that know what to do with them.
+ */
+export interface SourceMeta {
+  figma?: {
+    /**
+     * Figma constraints (`horizontal`/`vertical`). Used by the responsive
+     * inference and codegen layers to pick `position: sticky`,
+     * `flex-grow: 1`, `align-self: stretch`, etc.
+     */
+    constraints?: {
+      horizontal?: 'LEFT' | 'RIGHT' | 'CENTER' | 'LEFT_RIGHT' | 'SCALE';
+      vertical?: 'TOP' | 'BOTTOM' | 'CENTER' | 'TOP_BOTTOM' | 'SCALE';
+    };
+    /** Original Figma autolayout descriptor. */
+    autoLayout?: {
+      direction: 'HORIZONTAL' | 'VERTICAL';
+      primaryAlign?: 'MIN' | 'CENTER' | 'MAX' | 'SPACE_BETWEEN';
+      counterAlign?: 'MIN' | 'CENTER' | 'MAX' | 'BASELINE';
+      itemSpacing?: number;
+      counterAxisSpacing?: number;
+      layoutWrap?: 'NO_WRAP' | 'WRAP';
+      primarySizing?: 'FIXED' | 'AUTO';
+      counterSizing?: 'FIXED' | 'AUTO';
+    };
+    /** Per-axis sizing modes (Figma's `layoutSizingHorizontal/Vertical`). */
+    sizing?: {
+      horizontal?: 'FIXED' | 'HUG' | 'FILL';
+      vertical?: 'FIXED' | 'HUG' | 'FILL';
+    };
+    /** Component instance metadata: which master, which overrides. */
+    instance?: {
+      componentId: string;
+      componentSetId?: string;
+      componentName?: string;
+      /** Property keys that the instance overrode vs. the master. */
+      overrides?: Array<string>;
+    };
+    /** Marker for component master nodes (so codegen can extract them). */
+    component?: {
+      key: string;
+      name: string;
+      setKey?: string;
+      variantProps?: Record<string, string>;
+    };
+    /** Per-side stroke widths when Figma provides individualStrokeWeights. */
+    strokeWeights?: { top: number; right: number; bottom: number; left: number };
+    /** Text-resize behaviour (`textAutoResize`). */
+    textAutoResize?: 'NONE' | 'WIDTH_AND_HEIGHT' | 'HEIGHT' | 'TRUNCATE';
+  };
+}
+
 export interface IRNode {
   id: string;
   type: IRNodeType;
@@ -157,6 +230,8 @@ export interface IRNode {
   semantics?: Semantics;
   /** Per-breakpoint overrides (set by responsive inference). */
   responsive?: ResponsiveVariants;
+  /** Source-tool metadata preserved through the pipeline. */
+  meta?: SourceMeta;
 }
 
 export interface IRDocument {
@@ -166,6 +241,27 @@ export interface IRDocument {
   root: IRNode;
   /** Design tokens extracted during parsing */
   tokens?: DesignTokens;
+  /**
+   * Full deduplicated token set produced by the token-extraction stage.
+   * Code generators consult this to substitute hardcoded values with
+   * named token references (so generated code references `blue-500` and
+   * `gap-3` instead of inline hex/pixel literals).
+   */
+  tokenSet?: ExtendedTokenSet;
+}
+
+/**
+ * The extended token bag stamped onto `IRDocument.tokenSet`. Mirrors
+ * `tokens/extract.ts#TokenSet` but redeclared here so the IR layer
+ * stays free of concrete imports from later stages.
+ */
+export interface ExtendedTokenSet {
+  colors: Record<string, string>;
+  fontSizes: Record<string, number>;
+  fontWeights: Record<string, number>;
+  spacings: Record<string, number>;
+  radii: Record<string, number>;
+  shadows: Record<string, string>;
 }
 
 // 多页面文档：包含多个 IRDocument（页面）

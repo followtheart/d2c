@@ -19,12 +19,18 @@ Based on the architecture described in [`doc/opus4.6.md`](doc/opus4.6.md) and
 ## Architecture
 
 ```
-┌───────────┐   ┌─────────┐   ┌────────┐   ┌──────────────┐   ┌───────────┐   ┌──────────┐
-│ Design    │──▶│ Parser  │──▶│ IR     │──▶│ Layout       │──▶│ Semantic  │──▶│ Codegen  │
-│ File(JSON)│   │ (Figma/ │   │ (tree) │   │ Inference    │   │ Enhancer  │   │ (React/  │
-│           │   │ native) │   │        │   │ (abs → flex) │   │ (rules +  │   │  Vue/    │
-│           │   │         │   │        │   │              │   │  LLM)     │   │  HTML)   │
-└───────────┘   └─────────┘   └────────┘   └──────────────┘   └───────────┘   └──────────┘
+┌───────────┐   ┌─────────┐   ┌────────┐   ┌──────────────┐   ┌──────────────┐   ┌───────────┐   ┌──────────┐
+│ Design    │──▶│ Parser  │──▶│ IR     │──▶│ Layout       │──▶│ Layout LLM   │──▶│ Semantic  │──▶│ Codegen  │
+│ File(JSON)│   │ (Figma/ │   │ (tree+ │   │ Inference    │   │ Refiner      │   │ Enhancer  │   │ (token-  │
+│           │   │ native) │   │ meta)  │   │ (abs → flex, │   │ (low-conf    │   │ (rules +  │   │  aware,  │
+│           │   │         │   │        │   │  +confidence)│   │  containers, │   │  LLM)     │   │  React/  │
+│           │   │         │   │        │   │              │   │  optional)   │   │           │   │  Vue/…)  │
+└───────────┘   └─────────┘   └────┬───┘   └──────────────┘   └──────────────┘   └───────────┘   └────┬─────┘
+                                   │                                                                  │
+                                   │   ┌──────────────────────────────────────────────────────┐       │
+                                   └──▶│ Visual feedback loop (optional)                      │◀──────┘
+                                       │ render → score → mark low-fidelity → re-refine       │
+                                       └──────────────────────────────────────────────────────┘
 ```
 
 ### Pipeline stages
@@ -34,45 +40,72 @@ Based on the architecture described in [`doc/opus4.6.md`](doc/opus4.6.md) and
    Figma Make (`.make`), Sketch JSON, or native hand-authorable JSON;
    produces the IR tree.
 2. **IR** (`src/ir`) — the tool/target-agnostic intermediate representation
-   (node types, box, layout, style, text, semantics).
+   (node types, box, layout, style, text, semantics). Also carries
+   **source-tool metadata** (`node.meta.figma`) — Figma constraints,
+   auto-layout descriptor, sizing modes (`FIXED`/`HUG`/`FILL`), instance
+   ↔ component links, per-side stroke widths, `textAutoResize` — so
+   downstream stages can consult tool-specific information instead of
+   working from a lossy generic shape.
 3. **Layout inference** (`src/layout`) — deterministic rule engine that
    analyzes child geometry and converts absolute positioning to flex/grid
-   layouts (direction, gap, justify, align, space-between, grid columns).
-4. **Semantic enhancement** (`src/ai`) — heuristic + optional LLM.
+   layouts (direction, gap, justify, align, space-between, grid columns,
+   `flex-wrap`). Each container's resulting layout carries
+   `layout.confidence` (0-1) and `layout.source`
+   (`figma-autolayout` | `rule-engine` | `llm-refined` | `vision-refined`)
+   so later stages can selectively re-decide low-confidence containers.
+4. **Layout LLM refiner** (`src/layout/llmRefiner.ts`, optional) —
+   pluggable provider that re-runs layout inference on containers the
+   rule engine flagged as low-confidence (or fell back to `absolute`).
+   Inject any vision/structured-text model via the `LayoutLLMProvider`
+   interface; default pipeline runs offline and skips this stage.
+5. **Semantic enhancement** (`src/ai`) — heuristic + optional LLM.
    Detects headers/nav/footer, buttons, headings, repeating list patterns,
    and assigns semantic roles / component names. Pluggable `LLMProvider`
    interface; a Claude provider is included out of the box.
-5. **Component matching** (`src/ai/componentMatch.ts`, optional) — rule-based
+6. **Component matching** (`src/ai/componentMatch.ts`, optional) — rule-based
    detector that maps IR nodes to known component-library components
    (`antd`, `mui`) so codegen can emit `<Button type="primary">` instead of
    bespoke divs.
-6. **Responsive inference** (`src/layout/responsive.ts`, optional) — diffs
+7. **Responsive inference** (`src/layout/responsive.ts`, optional) — diffs
    one or more secondary IR documents (different viewports of the same
    design) against the base and stamps `node.responsive[breakpoint]`
    overrides on the matching nodes.
-7. **Protected region merge** (`src/diff/merge.ts`, optional) — preserves
+8. **Protected region merge** (`src/diff/merge.ts`, optional) — preserves
    subtrees marked `semantics.aiIgnore = true` from a previous IR across
    regenerations and emits a structural diff for CI logs.
-8. **Token extraction** (`src/tokens/extract.ts`) — walks the IR, collects
+9. **Token extraction** (`src/tokens/extract.ts`) — walks the IR, collects
    recurring colors, font sizes, spacings, radii and shadows into a
    deduplicated `TokenSet`, then exposes a `style-dictionary`-shaped JSON
    and a generated **Tailwind preset** (`src/tokens/tailwindPreset.ts`).
-9. **Code generation** (`src/codegen`) — platform-specific renderer that
-   walks the enhanced IR and produces the target code. Ships with:
-   - `ReactGenerator` — React + Tailwind CSS (arbitrary values)
-   - `VueGenerator` — Vue 3 SFC with `<script setup>` and scoped CSS
-   - `HtmlGenerator` — HTML + external stylesheet (with class deduplication)
-   - `ReactNativeGenerator` — `View` / `Text` / `Image` / `Pressable` +
-     `StyleSheet.create`
-   - `FlutterGenerator` — `StatelessWidget` with `Container` / `Row` /
-     `Column` / `Text` / `Image.network`
+   The full `TokenSet` is also stamped onto `IRDocument.tokenSet` so the
+   code generator can emit semantic class names.
+10. **Code generation** (`src/codegen`) — platform-specific renderer that
+    walks the enhanced IR and produces the target code. The React generator
+    is **token-aware** — it consults a reverse lookup
+    (`src/tokens/resolver.ts`) and emits semantic Tailwind classes
+    (`bg-blue-500`, `gap-3`, `text-base`, `rounded-md`) when a value
+    matches a token, falling back to arbitrary literals
+    (`bg-[#3f8cff]`, `gap-[12px]`) only for unique values. Ships with:
+    - `ReactGenerator` — React + Tailwind CSS (token-aware + arbitrary)
+    - `VueGenerator` — Vue 3 SFC with `<script setup>` and scoped CSS
+    - `HtmlGenerator` — HTML + external stylesheet (with class deduplication)
+    - `ReactNativeGenerator` — `View` / `Text` / `Image` / `Pressable` +
+      `StyleSheet.create`
+    - `FlutterGenerator` — `StatelessWidget` with `Container` / `Row` /
+      `Column` / `Text` / `Image.network`
+11. **Visual feedback loop** (`src/pipeline/visualFeedback.ts`, optional) —
+    closes the back-edge from output to input. Given a renderer + a
+    fidelity scorer, it runs `render → score → mark → refine` as a
+    fixed-point iteration: low-region-score nodes have their
+    `layout.confidence` stamped low so the next refine pass picks them up.
+    Stops when scores plateau or the iteration budget is exhausted.
 
 ## Quickstart
 
 ```bash
 npm install        # installs only typescript + @types/node (zero runtime deps)
 npm run build
-npm test           # runs the node:test suite (217 tests, end-to-end)
+npm test           # runs the node:test suite (end-to-end)
 
 # Generate React code from the sample design
 node dist/cli.js --input examples/sample-design.json --platform react --out out/react
@@ -718,6 +751,82 @@ const report = await compareStages(vision, './rendered-images/');
 console.log(reportToMarkdown(report));
 ```
 
+## Fidelity engineering — closing the five loss paths
+
+设计稿 → 代码的还原度损失通常出现在五个固定的位置。d2c 针对每条损失路径都提供了对应的工程化手段：
+
+| # | 损失路径 | 风险点 | 项目中的对策 |
+|---|---------|--------|--------------|
+| 1 | **IR 抽象降级** | Figma autolayout / constraints / variants / instances 在解析阶段被丢弃 | `IRNode.meta.figma` 保留 autoLayout / constraints / sizing (`FIXED`/`HUG`/`FILL`) / instance ↔ component / 四边描边 / `textAutoResize`；解析器原样转写，下游可读 |
+| 2 | **布局启发式误差** | 规则引擎一旦判错，下游全部基于错误布局 | `Layout.confidence` (0-1) + `Layout.source` 标注每个容器的判定来源；混合重叠/绝对回退被打低分以便后续重判 |
+| 3 | **LLM 用错位置** | 智能资源给了语义标注，最需要智能的布局推断却纯靠规则 | `refineLayoutWithLLM` 阶段：仅把 `confidence < threshold` 或 `absolute` 兜底的容器送给视觉/结构化模型重判，结果回写为 `source: llm-refined` |
+| 4 | **无视觉反馈回路** | 一锤定音，pipeline 不会回头看原稿 | `runVisualFeedback`：`render → score → mark → refine` 定点迭代；区域分低于阈值的节点被打低 `confidence`，下一轮 refiner 自动捡回 |
+| 5 | **CSS 映射粗糙** | token 与生成代码脱节，硬编码 hex/像素值 | `IRDocument.tokenSet` + `buildTokenLookup` 反查表；React 代码生成器优先输出 `bg-blue-500` / `gap-3` / `text-base` / `rounded-md`，独有值才回退到 arbitrary |
+
+### 1. 启用 LLM 布局重判
+
+```ts
+import { runPipeline, type LayoutLLMProvider } from 'd2c';
+
+const layoutRefiner: LayoutLLMProvider = {
+  async refine(candidates) {
+    // candidates: 含低 confidence 的容器 + 子节点 box；交给视觉/结构化模型
+    return candidates.map((c) => ({
+      nodeId: c.node.id,
+      layout: { type: 'flex', direction: 'row', gap: 12, confidence: 0.9 },
+    }));
+  },
+};
+
+const result = await runPipeline(designJson, {
+  platform: 'react',
+  layoutRefiner,
+  layoutRefineOptions: { threshold: 0.5, minChildren: 2 },
+});
+```
+
+`buildRefinePayload(node)` 与 `DEFAULT_REFINE_PROMPT` 也在公共 API 中导出，
+便于自定义 provider 复用同一份提示词格式。
+
+### 2. 启用视觉反馈回路
+
+```ts
+import {
+  runVisualFeedback,
+  type VisualFeedbackRenderer,
+  type VisualFeedbackScorer,
+} from 'd2c';
+
+const renderer: VisualFeedbackRenderer = {
+  async render(doc) { /* Playwright 截图 / 任意你信得过的渲染器 */ },
+};
+const scorer: VisualFeedbackScorer = {
+  async score(reference, candidate, doc) {
+    // 复用 src/compare 模块（SSIM + ΔE 区域评分）
+    // 返回 RegionScore[]
+  },
+};
+
+const { ir, iterations } = await runVisualFeedback(
+  initialIR, designPng, renderer, scorer, layoutRefiner,
+  { fidelityThreshold: 0.7, maxIterations: 2 },
+);
+```
+
+返回的 `iterations[]` 含每轮的 `meanFidelity` / `belowThreshold`，便于在 CI 中
+观察迭代是否收敛。
+
+### 3. 让设计 token 真正承载样式
+
+```ts
+const result = await runPipeline(designJson, { platform: 'react' });
+// result.ir.tokenSet → 完整 TokenSet（colors / fontSizes / spacings / radii / shadows）
+// 生成的 React 代码会优先引用 token 名，而非裸 hex / 像素值
+```
+
+> 没有 LLM Key、没有 Playwright 时，第 3、5 条仍然全程生效；第 1、2 条
+> 是纯解析/规则改造，离线即可受益；第 3、4 条是可选注入点，按需启用。
+
 ## Adding new targets
 
 Implement `CodeGenerator` (`src/codegen/base.ts`) and register in
@@ -747,25 +856,37 @@ Mapped to the phases described in the design docs:
       预览，保留渐变、旋转、四角圆角、内阴影 / 模糊、真实图片填充、多画板。
 - [x] **P7**: Figma REST API 集成 — 通过 Figma API 直接从云端获取设计文件，
       支持文件解析→代码生成、HTML/SVG 预览、服务端图片导出三种模式。
+- [x] **P8**: 还原度工程化 — IR 保留源工具语义（`meta.figma`：autolayout/
+      constraints/sizing/instance/component/strokeWeights/textAutoResize），
+      布局推断输出 `confidence` + `source`，新增可注入的 `LayoutLLMProvider`
+      只重判低置信容器，新增 `runVisualFeedback` 视觉反馈定点迭代，
+      代码生成器接入 `tokenSet` 反查表自动用 `bg-blue-500` / `gap-3` 替换裸值。
 
 ## Directory layout
 
 ```
 src/
-├── ir/            # Intermediate representation types & runtime validation
+├── ir/            # Intermediate representation types (incl. SourceMeta /
+│                  # ExtendedTokenSet) & runtime validation
 ├── api/           # Figma REST API client + API renderer
-├── parser/        # Figma REST + .fig binary + Figma Make + Sketch + native parsers
-├── layout/        # Deterministic layout inference + responsive merge
+├── parser/        # Figma REST + .fig binary + Figma Make + Sketch + native
+│                  # parsers; figmaParser preserves autolayout/constraints/
+│                  # instance/component metadata onto IRNode.meta
+├── layout/        # Deterministic layout inference (with confidence + source)
+│                  # + responsive merge + LayoutLLMProvider refiner
 ├── ai/            # Rule-based + optional LLM semantic enhancer +
 │                  # antd/MUI component matching + VisionProvider
-├── tokens/        # Design token extraction + Tailwind preset generator
+├── tokens/        # Design token extraction + Tailwind preset +
+│                  # token resolver (reverse lookup for codegen)
 ├── diff/          # IR diff + ai:ignore protected region merge
 ├── codegen/       # React, Vue, HTML, React Native, Flutter generators
+│                  # (React generator is token-aware)
 ├── renderer/      # High-fidelity .fig/Sketch/Make → SVG/HTML preview +
 │                  # stage snapshot renderers + Playwright screenshot service
 ├── pipeline/      # End-to-end orchestration + verification +
-│                  # multimodal stage comparison + report generation
-├── tests/         # node:test suite (217 tests, no extra deps)
+│                  # multimodal stage comparison + visual feedback loop +
+│                  # report generation
+├── tests/         # node:test suite (no extra deps)
 ├── utils/         # Shared helpers (color, tree walking, case)
 ├── index.ts       # Library entry
 └── cli.ts         # CLI entry

@@ -12,6 +12,11 @@ import * as path from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { parseDesign, parseDesignMultiPage, DesignFormat } from '../parser';
 import { inferLayout } from '../layout/inference';
+import {
+  refineLayoutWithLLM,
+  LayoutLLMProvider,
+  RefineOptions,
+} from '../layout/llmRefiner';
 import { enhance, LLMProvider } from '../ai/semanticEnhancer';
 import { createGenerator, Platform } from '../codegen/factory';
 import type { GenerateResult } from '../codegen/base';
@@ -55,6 +60,14 @@ export interface PipelineOptions {
   previousIR?: IRDocument;
   /** Compute and return a structural diff against `previousIR`. */
   computeDiff?: boolean;
+  /**
+   * Optional vision/LLM provider that re-runs layout inference for
+   * containers the rule engine flagged as low-confidence. When omitted,
+   * the rule engine's output is used as-is and the pipeline stays offline.
+   */
+  layoutRefiner?: LayoutLLMProvider;
+  /** Threshold + min-children settings for the layout refiner. */
+  layoutRefineOptions?: RefineOptions;
 }
 
 export interface PipelineResult {
@@ -240,7 +253,16 @@ export async function runPipeline(
   const parsed = parseDesign(rawInput, opts.format ?? 'auto');
 
   log(opts.verbose, '[2/7] Inferring layouts...');
-  const layoutTree = inferLayout(parsed.root);
+  let layoutTree = inferLayout(parsed.root);
+
+  if (opts.layoutRefiner) {
+    log(opts.verbose, '[2.5/7] Refining low-confidence layouts via LLM...');
+    layoutTree = await refineLayoutWithLLM(
+      layoutTree,
+      opts.layoutRefiner,
+      opts.layoutRefineOptions,
+    );
+  }
 
   log(opts.verbose, '[3/7] Semantic enhancement...');
   let enhancedTree = await enhance(layoutTree, { llm: opts.llm });
@@ -268,6 +290,13 @@ export async function runPipeline(
   const tokens = extractTokens(ir);
   const styleDictionary = toStyleDictionary(tokens);
   const tailwindPreset = generateTailwindPreset(tokens);
+  // Make the tokens available on the IR document so the code generator
+  // can substitute hardcoded literals with token references.
+  ir = {
+    ...ir,
+    tokens: irTokensFromExtracted(tokens),
+    tokenSet: tokens,
+  };
 
   log(opts.verbose, `[7/7] Generating ${opts.platform} code...`);
   const generator = createGenerator(opts.platform);
@@ -281,6 +310,21 @@ export async function runPipeline(
     styleDictionary,
     tailwindPreset,
     diff,
+  };
+}
+
+function irTokensFromExtracted(tokens: TokenSet): IRDocument['tokens'] {
+  // The IR's `DesignTokens` shape is a small subset of the rich `TokenSet`
+  // — translate the fields it knows about so downstream generators can
+  // also access tokens via the IR (rather than re-running extraction).
+  const typography: NonNullable<IRDocument['tokens']>['typography'] = {};
+  for (const [name, size] of Object.entries(tokens.fontSizes)) {
+    typography[name] = { fontSize: size, fontWeight: 400 };
+  }
+  return {
+    colors: { ...tokens.colors },
+    spacing: { ...tokens.spacings },
+    typography,
   };
 }
 
@@ -319,7 +363,15 @@ export async function runPipelineWithVerification(
   // [2] Layout inference
   t0 = Date.now();
   log(opts.verbose, '[2/7] Inferring layouts...');
-  const layoutTree = inferLayout(parsed.root);
+  let layoutTree = inferLayout(parsed.root);
+  if (opts.layoutRefiner) {
+    log(opts.verbose, '[2.5/7] Refining low-confidence layouts via LLM...');
+    layoutTree = await refineLayoutWithLLM(
+      layoutTree,
+      opts.layoutRefiner,
+      opts.layoutRefineOptions,
+    );
+  }
   const layoutDoc: IRDocument = { ...parsed, root: layoutTree };
   snapshots.push({
     stage: 'layout',
@@ -391,6 +443,12 @@ export async function runPipelineWithVerification(
   const tokens = extractTokens(ir);
   const styleDictionary = toStyleDictionary(tokens);
   const tailwindPreset = generateTailwindPreset(tokens);
+  // Attach tokens to the IR so the codegen layer can substitute them.
+  ir = {
+    ...ir,
+    tokens: irTokensFromExtracted(tokens),
+    tokenSet: tokens,
+  };
   snapshots.push({
     stage: 'tokens',
     durationMs: Date.now() - t0,
