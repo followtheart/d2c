@@ -43,11 +43,15 @@ export function buildCssProps(
 
   // Box sizing
   if (isRoot && typeof box.width === 'number') {
-    // Root container: responsive max-width instead of fixed width
-    css['max-width'] = px(box.width);
-    css.width = '100%';
-    css['margin-left'] = 'auto';
-    css['margin-right'] = 'auto';
+    if (layout.type === 'absolute') {
+      css.width = px(box.width);
+    } else {
+      // Root container: responsive max-width instead of fixed width
+      css['max-width'] = px(box.width);
+      css.width = '100%';
+      css['margin-left'] = 'auto';
+      css['margin-right'] = 'auto';
+    }
   } else if (box.width === 'fill') {
     if (parentLayout === 'flex' && (parentDirection === 'row' || !parentDirection)) {
       css.flex = '1 1 0%';

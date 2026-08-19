@@ -1251,19 +1251,24 @@ function pageToIRDocument(page: FigPage, docName: string, defaultWidth: number, 
       rootNode.layout.confidence = 0.2;
       rootNode.layout.source = 'rule-engine';
     }
-  } else if (page.children.length > 1) {
-    const maxW = Math.max(...page.children.map((c) => c.x + c.width), defaultWidth);
-    const maxH = Math.max(...page.children.map((c) => c.y + c.height), defaultHeight);
+  } else if (visibleChildren.length > 1) {
+    const minX = Math.min(...visibleChildren.map((c) => c.x));
+    const minY = Math.min(...visibleChildren.map((c) => c.y));
+    const maxX = Math.max(...visibleChildren.map((c) => c.x + c.width), defaultWidth + minX);
+    const maxY = Math.max(...visibleChildren.map((c) => c.y + c.height), defaultHeight + minY);
     rootNode = {
       id: `fig-page-${page.id}`,
       name: page.name,
       type: 'container',
-      box: { x: 0, y: 0, width: maxW, height: maxH },
-      layout: { type: 'absolute' },
+      box: { x: 0, y: 0, width: maxX - minX, height: maxY - minY },
+      layout: { type: 'absolute', confidence: 0.2, source: 'rule-engine' },
       style: {},
-      children: page.children
-        .filter((n) => n.visible !== false)
-        .map((n) => figNodeToIR(n)),
+      children: visibleChildren.map((n) => {
+        const child = figNodeToIR(n);
+        child.box.x -= minX;
+        child.box.y -= minY;
+        return child;
+      }),
     };
   } else {
     rootNode = {

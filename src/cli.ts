@@ -13,6 +13,7 @@ import * as path from 'path';
 import { runPipeline, runMultiPagePipeline, runPipelineWithVerification, runMultiPagePipelineWithVerification, type PipelineResult } from './pipeline/d2cPipeline';
 import { formatVerificationReport, snapshotToJSON } from './pipeline/verify';
 import type { Platform } from './codegen/factory';
+import type { GenerateResult } from './codegen/base';
 import type { DesignFormat } from './parser';
 import { ClaudeProvider } from './ai/claudeProvider';
 import {
@@ -517,6 +518,9 @@ Options:
                  --reference-image, --platform html,
                  pngjs and Playwright. Implies
                  --refine-layout-with-llm.
+                 In multi-page mode, --reference-image can be a directory
+                 containing <page>.png / page_<n>.png / <n>.png, or a
+                 template with {page}, {index}, or {n}.
       --visual-feedback-threshold <n>  Region fidelity threshold in [0,1]
                  (default: 0.7).
       --visual-feedback-iterations <n> Max feedback iterations (default: 2).
@@ -868,23 +872,90 @@ function createLayoutRefiner(
   return new CliLayoutRefiner(llm);
 }
 
+const VISUAL_REFERENCE_EXTS = ['.png', '.jpg', '.jpeg', '.webp'];
+
+function safeVisualPageName(name: string, fallback = 'page'): string {
+  return name.replace(/[^a-zA-Z0-9_\u4e00-\u9fff -]/g, '_').replace(/^_+|_+$/g, '') || fallback;
+}
+
+function resolveVisualFeedbackReference(
+  args: Args,
+  pageName: string,
+  pageIndex: number,
+  pageCount: number,
+): string {
+  if (!args.referenceImage) {
+    console.error('ERROR: --visual-feedback requires --reference-image <file|dir|template>.');
+    process.exit(2);
+  }
+
+  const ref = args.referenceImage;
+  const safeName = safeVisualPageName(pageName, `page_${pageIndex + 1}`);
+  const oneBased = String(pageIndex + 1);
+  const zeroBased = String(pageIndex);
+
+  if (ref.includes('{page}') || ref.includes('{index}') || ref.includes('{n}')) {
+    const expanded = ref
+      .replaceAll('{page}', safeName)
+      .replaceAll('{index}', zeroBased)
+      .replaceAll('{n}', oneBased);
+    if (fs.existsSync(expanded)) return expanded;
+    console.error(`ERROR: visual-feedback reference image not found: ${expanded}`);
+    process.exit(2);
+  }
+
+  if (!fs.existsSync(ref)) {
+    console.error(`ERROR: reference image not found: ${ref}`);
+    process.exit(2);
+  }
+
+  const stat = fs.statSync(ref);
+  if (stat.isFile()) {
+    if (pageCount > 1) {
+      console.error(
+        'ERROR: multi-page --visual-feedback requires --reference-image to be a directory or a template with {page}, {index}, or {n}.',
+      );
+      process.exit(2);
+    }
+    return ref;
+  }
+
+  if (!stat.isDirectory()) {
+    console.error(`ERROR: --reference-image must be a file, directory, or template: ${ref}`);
+    process.exit(2);
+  }
+
+  const bases = [
+    safeName,
+    pageName,
+    `page_${oneBased}`,
+    `page-${oneBased}`,
+    oneBased,
+    zeroBased,
+    String(pageIndex + 1).padStart(2, '0'),
+  ];
+  const candidates = bases.flatMap((base) => VISUAL_REFERENCE_EXTS.map((ext) => path.join(ref, `${base}${ext}`)));
+  const found = candidates.find((candidate) => fs.existsSync(candidate));
+  if (found) return found;
+
+  console.error(
+    `ERROR: no reference image found for page "${pageName}" in ${ref}. Tried: ${candidates.map((c) => path.basename(c)).join(', ')}`,
+  );
+  process.exit(2);
+}
+
 async function runVisualFeedbackOnResult(
   args: Args,
   result: PipelineResult,
   layoutRefiner: LayoutLLMProvider,
+  pageIndex = 0,
+  pageCount = 1,
 ): Promise<PipelineResult> {
-  if (!args.referenceImage) {
-    console.error('ERROR: --visual-feedback requires --reference-image <file>.');
-    process.exit(2);
-  }
   if (args.platform !== 'html') {
     console.error('ERROR: --visual-feedback currently requires --platform html.');
     process.exit(2);
   }
-  if (!fs.existsSync(args.referenceImage)) {
-    console.error(`ERROR: reference image not found: ${args.referenceImage}`);
-    process.exit(2);
-  }
+  const referenceImage = resolveVisualFeedbackReference(args, result.ir.name, pageIndex, pageCount);
 
   const outBase = args.out && args.out !== '-' ? args.out : 'out';
   const feedbackDir = args.visualFeedbackDir ?? path.join(outBase, 'visual-feedback');
@@ -934,7 +1005,7 @@ async function runVisualFeedbackOnResult(
   console.error(`d2c visual-feedback: running feedback loop → ${feedbackDir}`);
   const feedback = await runVisualFeedback(
     result.ir,
-    fs.readFileSync(args.referenceImage),
+    fs.readFileSync(referenceImage),
     renderer,
     scorer,
     layoutRefiner,
@@ -977,6 +1048,46 @@ async function runVisualFeedbackOnResult(
     tokens,
     styleDictionary: toStyleDictionary(tokens),
     tailwindPreset: generateTailwindPreset(tokens),
+  };
+}
+
+async function runVisualFeedbackOnMultiPageResult<T extends { pages: PipelineResult[]; generated: GenerateResult }>(
+  args: Args,
+  multiResult: T,
+  layoutRefiner: LayoutLLMProvider,
+): Promise<T> {
+  const outBase = args.out && args.out !== '-' ? args.out : 'out';
+  const baseFeedbackDir = args.visualFeedbackDir ?? path.join(outBase, 'visual-feedback');
+  fs.mkdirSync(baseFeedbackDir, { recursive: true });
+
+  const finalPages: PipelineResult[] = [];
+  for (let i = 0; i < multiResult.pages.length; i++) {
+    const page = multiResult.pages[i];
+    const pageDir = path.join(baseFeedbackDir, `${String(i + 1).padStart(2, '0')}-${safeVisualPageName(page.ir.name, `page_${i + 1}`)}`);
+    const pageArgs: Args = { ...args, visualFeedbackDir: pageDir };
+    console.error(`d2c visual-feedback: [${i + 1}/${multiResult.pages.length}] ${page.ir.name}`);
+    finalPages.push(await runVisualFeedbackOnResult(pageArgs, page, layoutRefiner, i, multiResult.pages.length));
+  }
+
+  const { createGenerator } = await import('./codegen/factory');
+  const generated = createGenerator(args.platform).generateMultiPage(finalPages.map((page) => page.ir));
+  fs.writeFileSync(
+    path.join(baseFeedbackDir, 'summary.json'),
+    JSON.stringify(
+      finalPages.map((page, index) => ({
+        page: page.ir.name,
+        index,
+        feedbackDir: `${String(index + 1).padStart(2, '0')}-${safeVisualPageName(page.ir.name, `page_${index + 1}`)}`,
+      })),
+      null,
+      2,
+    ),
+  );
+
+  return {
+    ...multiResult,
+    pages: finalPages,
+    generated,
   };
 }
 
@@ -1160,11 +1271,6 @@ async function figmaApiCommand(args: Args): Promise<void> {
     effectiveBaseUrl,
   );
 
-  if (args.visualFeedback && args.allPages) {
-    console.error('ERROR: --visual-feedback currently supports single-page inputs only.');
-    process.exit(2);
-  }
-
   let llm: LLMProvider | undefined;
   if (!args.noLlm && args.useClaude) {
     const apiKey = resolveApiKey('anthropic', 'ANTHROPIC_API_KEY', config);
@@ -1223,9 +1329,18 @@ async function figmaApiCommand(args: Args): Promise<void> {
   };
 
   if (args.allPages) {
-    const multiResult = args.verify
+    let multiResult = args.verify
       ? await runMultiPagePipelineWithVerification(pipelineInput, pipelineOpts)
       : await runMultiPagePipeline(pipelineInput, pipelineOpts);
+
+    if (args.visualFeedback) {
+      if (!layoutRefiner) {
+        console.error('ERROR: --visual-feedback requires a layout LLM refiner.');
+        process.exit(2);
+      }
+      multiResult = await runVisualFeedbackOnMultiPageResult(args, multiResult, layoutRefiner);
+    }
+
     const { generated } = multiResult;
     if (out === '-') {
       for (const file of generated.files) {
@@ -1622,11 +1737,6 @@ async function main(): Promise<void> {
     }
   }
 
-  if (args.visualFeedback && args.allPages) {
-    console.error('ERROR: --visual-feedback currently supports single-page inputs only.');
-    process.exit(2);
-  }
-
   // Pre-parse responsive variants (each one runs through Parse + Layout
   // inference so the diff sees the same shape as the base IR).
   const { parseDesign } = await import('./parser');
@@ -1670,6 +1780,15 @@ async function main(): Promise<void> {
       console.error('d2c: multi-page pipeline error:', err);
       process.exit(1);
     }
+
+    if (args.visualFeedback) {
+      if (!layoutRefiner) {
+        console.error('ERROR: --visual-feedback requires a layout LLM refiner.');
+        process.exit(2);
+      }
+      multiResult = await runVisualFeedbackOnMultiPageResult(args, multiResult, layoutRefiner);
+    }
+
     const { generated } = multiResult;
     const out = args.out ?? '-';
     if (out === '-') {

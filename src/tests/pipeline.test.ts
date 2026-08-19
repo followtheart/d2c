@@ -135,6 +135,49 @@ test('layout inference: dashboard-like two-column canvas stays absolute', () => 
   assert.equal(laidOut.layout.type, 'absolute');
 });
 
+test('layout inference: fig page canvas keeps independent frames absolute', () => {
+  const root: IRNode = {
+    id: 'fig-page-1:2',
+    name: 'screens Ui',
+    type: 'container',
+    box: { x: 0, y: 0, width: 1800, height: 900 },
+    layout: { type: 'absolute', confidence: 0.2, source: 'rule-engine' },
+    style: {},
+    children: [
+      {
+        id: 'screen-a',
+        name: 'Screen A',
+        type: 'container',
+        box: { x: 100, y: 80, width: 375, height: 812 },
+        layout: { type: 'absolute' },
+        style: {},
+        children: [],
+      },
+      {
+        id: 'screen-b',
+        name: 'Screen B',
+        type: 'container',
+        box: { x: 575, y: 80, width: 375, height: 812 },
+        layout: { type: 'absolute' },
+        style: {},
+        children: [],
+      },
+      {
+        id: 'screen-c',
+        name: 'Screen C',
+        type: 'container',
+        box: { x: 1050, y: 80, width: 375, height: 812 },
+        layout: { type: 'absolute' },
+        style: {},
+        children: [],
+      },
+    ],
+  };
+
+  const laidOut = inferLayout(root);
+  assert.equal(laidOut.layout.type, 'absolute');
+});
+
 test('pipeline end-to-end: react output', async () => {
   const raw = loadExample('sample-design.json');
   const result = await runPipeline(raw, { platform: 'react' });

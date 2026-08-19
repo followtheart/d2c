@@ -234,6 +234,18 @@ function inferContainerLayout(node: IRNode): Layout {
   if (node.layout.type === 'flex' || node.layout.type === 'grid')
     return node.layout;
 
+  // Synthetic Figma page roots are design-tool canvases that can contain many
+  // independent screen frames. Inferring them as grid/flex compresses those
+  // frames into a web layout and creates severe overlap, so keep canvas
+  // coordinates absolute.
+  if (node.layout.type === 'absolute' && node.id.startsWith('fig-page-')) {
+    return {
+      ...node.layout,
+      confidence: node.layout.confidence ?? 0.2,
+      source: node.layout.source ?? 'rule-engine',
+    };
+  }
+
   if (
     node.layout.type === 'absolute' &&
     node.layout.confidence !== undefined &&
